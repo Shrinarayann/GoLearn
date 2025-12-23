@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
 
@@ -10,10 +10,35 @@ interface SessionData {
     session_id: string;
     title: string;
     status: string;
-    exploration_result?: Record<string, unknown>;
-    engagement_result?: Record<string, unknown>;
-    application_result?: Record<string, unknown>;
+    pdf_filename?: string;
+    exploration_result?: ExplorationResult;
+    engagement_result?: EngagementResult;
+    application_result?: ApplicationResult;
 }
+
+interface ExplorationResult {
+    structural_overview?: string;
+    summary?: string;
+    key_topics?: string[];
+    visual_elements?: string[];
+}
+
+interface EngagementResult {
+    concept_explanations?: Record<string, string>;
+    definitions?: Record<string, string>;
+    examples?: string[];
+    key_insights?: string[];
+}
+
+interface ApplicationResult {
+    practical_applications?: string[];
+    connections?: string[];
+    critical_analysis?: string;
+    study_focus?: string[];
+    mental_models?: string[];
+}
+
+type TabType = "exploration" | "engagement" | "application";
 
 export default function StudySessionPage() {
     const { user, token, loading } = useAuth();
@@ -24,7 +49,11 @@ export default function StudySessionPage() {
     const [session, setSession] = useState<SessionData | null>(null);
     const [content, setContent] = useState("");
     const [comprehending, setComprehending] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [error, setError] = useState("");
+    const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<TabType>("exploration");
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -42,16 +71,48 @@ export default function StudySessionPage() {
         if (!token) return;
         try {
             const data = await api.getSession(token, sessionId);
-            setSession(data);
+            setSession(data as SessionData);
+            if (data.pdf_filename) {
+                setUploadedFile(data.pdf_filename);
+            }
         } catch (error) {
             console.error("Failed to load session:", error);
             setError("Failed to load session");
         }
     };
 
+    const handleFileUpload = async (file: File) => {
+        if (!token) return;
+
+        if (!file.name.toLowerCase().endsWith(".pdf")) {
+            setError("Only PDF files are supported");
+            return;
+        }
+
+        setUploading(true);
+        setError("");
+
+        try {
+            const result = await api.uploadPdf(token, sessionId, file);
+            setUploadedFile(result.filename);
+            setSession(prev => prev ? { ...prev, status: "uploaded" } : null);
+        } catch (error) {
+            console.error("Upload failed:", error);
+            setError("Failed to upload PDF. Please try again.");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file) handleFileUpload(file);
+    };
+
     const runComprehension = async () => {
-        if (!token || !content.trim()) {
-            setError("Please paste your study content first");
+        if (!token || (!content.trim() && !uploadedFile)) {
+            setError("Please upload a PDF or paste your study content");
             return;
         }
 
@@ -59,15 +120,15 @@ export default function StudySessionPage() {
         setError("");
 
         try {
-            const result = await api.runComprehension(token, sessionId, content);
+            const result = await api.runComprehension(token, sessionId, content || undefined);
             setSession((prev) =>
                 prev
                     ? {
                         ...prev,
                         status: result.status,
-                        exploration_result: result.exploration,
-                        engagement_result: result.engagement,
-                        application_result: result.application,
+                        exploration_result: result.exploration as ExplorationResult,
+                        engagement_result: result.engagement as EngagementResult,
+                        application_result: result.application as ApplicationResult,
                     }
                     : null
             );
@@ -81,60 +142,132 @@ export default function StudySessionPage() {
 
     if (loading || !user) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            <div className="min-h-screen flex items-center justify-center bg-[#FAFBFC]">
+                <div className="animate-spin rounded-full h-10 w-10 border-2 border-[#0052CC] border-t-transparent"></div>
             </div>
         );
     }
 
+    const hasResults = session?.status === "ready" || session?.status === "quizzing";
+
+    const tabs = [
+        { id: "exploration" as TabType, label: "Exploration", num: 1 },
+        { id: "engagement" as TabType, label: "Engagement", num: 2 },
+        { id: "application" as TabType, label: "Application", num: 3 },
+    ];
+
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="min-h-screen bg-[#FAFBFC]">
             {/* Header */}
-            <header className="bg-white dark:bg-gray-800 shadow">
-                <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <Link href="/dashboard" className="text-indigo-600 hover:underline">
-                            ← Back
-                        </Link>
-                        <h1 className="text-xl font-bold text-gray-800 dark:text-white">
-                            {session?.title || "Loading..."}
-                        </h1>
+            <header className="bg-white border-b border-[#DFE1E6] sticky top-0 z-10">
+                <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                            <Link
+                                href="/dashboard"
+                                className="text-[#6B778C] hover:text-[#172B4D] transition-colors text-sm font-medium flex-shrink-0"
+                            >
+                                <span className="hidden sm:inline">← Back to Dashboard</span>
+                                <span className="sm:hidden">← Back</span>
+                            </Link>
+                            <span className="text-[#DFE1E6] hidden sm:inline">|</span>
+                            <h1 className="text-base sm:text-lg font-semibold text-[#172B4D] truncate">
+                                {session?.title || "Loading..."}
+                            </h1>
+                        </div>
+                        {hasResults && activeTab === "application" && (
+                            <Link
+                                href={`/quiz/${sessionId}`}
+                                className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center"
+                            >
+                                Start Quiz
+                            </Link>
+                        )}
                     </div>
-                    {session?.status === "ready" && (
-                        <Link
-                            href={`/quiz/${sessionId}`}
-                            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700"
-                        >
-                            Start Quiz →
-                        </Link>
-                    )}
                 </div>
             </header>
 
-            <main className="container mx-auto px-4 py-8">
+            <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
                 {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                    <div className="bg-[#FFEBE6] border border-[#FF8F73] text-[#DE350B] px-4 py-3 rounded mb-6 text-sm">
                         {error}
                     </div>
                 )}
 
                 {/* Input Section */}
-                {session?.status === "created" || session?.status === "uploaded" ? (
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8">
-                        <h2 className="text-lg font-semibold mb-4 text-gray-800 dark:text-white">
-                            Step 1: Paste Your Study Material
-                        </h2>
-                        <textarea
-                            value={content}
-                            onChange={(e) => setContent(e.target.value)}
-                            placeholder="Paste your study notes, textbook content, or article here..."
-                            className="w-full h-64 px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        />
-                        <div className="mt-4 flex justify-end">
+                {(session?.status === "created" || session?.status === "uploaded") && (
+                    <div className="space-y-4 sm:space-y-6">
+                        {/* PDF Upload */}
+                        <div className="bg-white rounded-lg border border-[#DFE1E6] p-4 sm:p-6">
+                            <h2 className="text-base font-semibold text-[#172B4D] mb-4">
+                                Upload Study Material
+                            </h2>
+                            <div
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={handleDrop}
+                                onClick={() => fileInputRef.current?.click()}
+                                className={`border-2 border-dashed rounded-lg p-6 sm:p-10 text-center cursor-pointer transition-all ${uploading
+                                        ? "border-[#4C9AFF] bg-[#DEEBFF]"
+                                        : uploadedFile
+                                            ? "border-[#36B37E] bg-[#E3FCEF]"
+                                            : "border-[#DFE1E6] hover:border-[#4C9AFF] hover:bg-[#F4F5F7]"
+                                    }`}
+                            >
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".pdf"
+                                    className="hidden"
+                                    onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+                                />
+                                {uploading ? (
+                                    <div className="flex flex-col items-center">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052CC] border-t-transparent mb-3"></div>
+                                        <p className="text-[#0052CC] font-medium">Uploading...</p>
+                                    </div>
+                                ) : uploadedFile ? (
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#36B37E] rounded-full flex items-center justify-center mb-3">
+                                            <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </div>
+                                        <p className="text-[#172B4D] font-medium text-sm sm:text-base">{uploadedFile}</p>
+                                        <p className="text-xs sm:text-sm text-[#6B778C] mt-1">Click to replace</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#F4F5F7] rounded-full flex items-center justify-center mb-3">
+                                            <svg className="w-5 h-5 sm:w-6 sm:h-6 text-[#6B778C]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                            </svg>
+                                        </div>
+                                        <p className="text-[#172B4D] font-medium text-sm sm:text-base">Drop your PDF here or click to browse</p>
+                                        <p className="text-xs sm:text-sm text-[#6B778C] mt-1">PDF files up to 20MB</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Text Input */}
+                        <div className="bg-white rounded-lg border border-[#DFE1E6] p-4 sm:p-6">
+                            <h2 className="text-base font-semibold text-[#172B4D] mb-4">
+                                Or paste text content
+                            </h2>
+                            <textarea
+                                value={content}
+                                onChange={(e) => setContent(e.target.value)}
+                                placeholder="Paste your study notes, textbook content, or article here..."
+                                className="w-full h-32 sm:h-40 px-3 sm:px-4 py-3 rounded border border-[#DFE1E6] focus:ring-2 focus:ring-[#4C9AFF] focus:border-transparent resize-none text-[#172B4D] placeholder-[#6B778C] text-sm"
+                            />
+                        </div>
+
+                        {/* Run Analysis Button */}
+                        <div className="flex justify-end">
                             <button
                                 onClick={runComprehension}
-                                disabled={comprehending || !content.trim()}
-                                className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                disabled={comprehending || (!content.trim() && !uploadedFile)}
+                                className="w-full sm:w-auto px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                             >
                                 {comprehending && (
                                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
@@ -143,66 +276,274 @@ export default function StudySessionPage() {
                             </button>
                         </div>
                     </div>
-                ) : null}
+                )}
 
                 {/* Comprehending State */}
                 {session?.status === "comprehending" && (
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center">
-                        <div className="animate-spin rounded-full h-16 w-16 border-4 border-indigo-600 border-t-transparent mx-auto mb-4"></div>
-                        <h2 className="text-xl font-semibold text-gray-800 dark:text-white">
-                            Analyzing Your Content...
-                        </h2>
-                        <p className="text-gray-600 dark:text-gray-400 mt-2">
-                            Running exploration, engagement, and application passes
-                        </p>
+                    <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 sm:p-12 text-center">
+                        <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-2 border-[#0052CC] border-t-transparent mx-auto mb-4"></div>
+                        <h2 className="text-base sm:text-lg font-semibold text-[#172B4D]">Analyzing your content...</h2>
+                        <p className="text-[#6B778C] mt-2 text-sm">Running exploration, engagement, and application passes</p>
                     </div>
                 )}
 
-                {/* Results Section */}
-                {session?.status === "ready" && (
-                    <div className="space-y-6">
-                        {/* Exploration */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-                            <h2 className="text-lg font-semibold mb-4 text-indigo-600 flex items-center gap-2">
-                                <span className="text-2xl">📖</span> Pass 1: Exploration
-                            </h2>
-                            <pre className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg overflow-auto text-sm text-gray-800 dark:text-gray-200">
-                                {JSON.stringify(session.exploration_result, null, 2)}
-                            </pre>
-                        </div>
+                {/* Results Section with Tabs */}
+                {hasResults && (
+                    <div className="space-y-4 sm:space-y-6">
+                        {/* Tabs */}
+                        <div className="bg-white rounded-lg border border-[#DFE1E6]">
+                            <div className="border-b border-[#DFE1E6] overflow-x-auto">
+                                <nav className="flex min-w-max">
+                                    {tabs.map((tab) => (
+                                        <button
+                                            key={tab.id}
+                                            onClick={() => setActiveTab(tab.id)}
+                                            className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id
+                                                    ? "border-[#0052CC] text-[#0052CC]"
+                                                    : "border-transparent text-[#6B778C] hover:text-[#172B4D] hover:border-[#DFE1E6]"
+                                                }`}
+                                        >
+                                            <span className="w-5 h-5 rounded-full bg-current/10 text-xs flex items-center justify-center font-bold">{tab.num}</span>
+                                            <span className="hidden sm:inline">{tab.label}</span>
+                                            <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+                                        </button>
+                                    ))}
+                                </nav>
+                            </div>
 
-                        {/* Engagement */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-                            <h2 className="text-lg font-semibold mb-4 text-green-600 flex items-center gap-2">
-                                <span className="text-2xl">🔍</span> Pass 2: Engagement
-                            </h2>
-                            <pre className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg overflow-auto text-sm text-gray-800 dark:text-gray-200">
-                                {JSON.stringify(session.engagement_result, null, 2)}
-                            </pre>
-                        </div>
-
-                        {/* Application */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-                            <h2 className="text-lg font-semibold mb-4 text-purple-600 flex items-center gap-2">
-                                <span className="text-2xl">🚀</span> Pass 3: Application
-                            </h2>
-                            <pre className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg overflow-auto text-sm text-gray-800 dark:text-gray-200">
-                                {JSON.stringify(session.application_result, null, 2)}
-                            </pre>
-                        </div>
-
-                        {/* Next Step */}
-                        <div className="text-center py-6">
-                            <Link
-                                href={`/quiz/${sessionId}`}
-                                className="inline-flex items-center gap-2 px-8 py-4 bg-purple-600 text-white rounded-full text-lg font-semibold hover:bg-purple-700 transition-all shadow-lg hover:shadow-xl"
-                            >
-                                Ready to Test Your Knowledge? Start Quiz →
-                            </Link>
+                            {/* Tab Content */}
+                            <div className="p-4 sm:p-6">
+                                {activeTab === "exploration" && session.exploration_result && (
+                                    <ExplorationTab data={session.exploration_result} />
+                                )}
+                                {activeTab === "engagement" && session.engagement_result && (
+                                    <EngagementTab data={session.engagement_result} />
+                                )}
+                                {activeTab === "application" && session.application_result && (
+                                    <ApplicationTab data={session.application_result} sessionId={sessionId} />
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
             </main>
+        </div>
+    );
+}
+
+// === Tab Components ===
+
+function ExplorationTab({ data }: { data: ExplorationResult }) {
+    return (
+        <div className="space-y-6">
+            {/* Summary */}
+            {data.summary && (
+                <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-5">
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#0747A6] mb-2 uppercase tracking-wide">Summary</h3>
+                    <p className="text-[#172B4D] text-sm sm:text-base">{data.summary}</p>
+                </div>
+            )}
+
+            {/* Structure */}
+            {data.structural_overview && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Document Structure</h3>
+                    <p className="text-[#172B4D] leading-relaxed text-sm sm:text-base">{data.structural_overview}</p>
+                </div>
+            )}
+
+            {/* Key Topics */}
+            {data.key_topics && data.key_topics.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Key Topics</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {data.key_topics.map((topic, i) => (
+                            <span
+                                key={i}
+                                className="px-3 py-1.5 bg-[#F4F5F7] text-[#172B4D] rounded-full text-xs sm:text-sm font-medium"
+                            >
+                                {topic}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Visual Elements */}
+            {data.visual_elements && data.visual_elements.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Visual Elements</h3>
+                    <ul className="space-y-2">
+                        {data.visual_elements.map((elem, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[#172B4D] text-sm">
+                                <span className="text-[#6B778C]">•</span>
+                                {elem}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function EngagementTab({ data }: { data: EngagementResult }) {
+    return (
+        <div className="space-y-6 sm:space-y-8">
+            {/* Concept Explanations */}
+            {data.concept_explanations && Object.keys(data.concept_explanations).length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Concept Explanations</h3>
+                    <div className="space-y-4">
+                        {Object.entries(data.concept_explanations).map(([concept, explanation], i) => (
+                            <div key={i} className="border-l-4 border-[#0052CC] pl-4 py-2">
+                                <h4 className="font-semibold text-[#172B4D] mb-1 text-sm sm:text-base">{concept}</h4>
+                                <p className="text-[#42526E] text-xs sm:text-sm leading-relaxed">{explanation}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Definitions */}
+            {data.definitions && Object.keys(data.definitions).length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Definitions</h3>
+                    <div className="bg-[#F4F5F7] rounded-lg divide-y divide-[#DFE1E6]">
+                        {Object.entries(data.definitions).map(([term, definition], i) => (
+                            <div key={i} className="px-3 sm:px-4 py-3 text-sm">
+                                <span className="font-semibold text-[#172B4D]">{term}:</span>
+                                <span className="text-[#42526E] ml-2">{definition}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Examples */}
+            {data.examples && data.examples.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Examples</h3>
+                    <div className="space-y-3">
+                        {data.examples.map((example, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#E3FCEF] rounded-lg p-3 sm:p-4">
+                                <span className="text-[#36B37E] font-bold flex-shrink-0">→</span>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{example}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Key Insights */}
+            {data.key_insights && data.key_insights.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Key Insights</h3>
+                    <div className="grid gap-3">
+                        {data.key_insights.map((insight, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#FFFAE6] rounded-lg p-3 sm:p-4">
+                                <svg className="w-4 h-4 text-[#FFAB00] flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{insight}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionId: string }) {
+    return (
+        <div className="space-y-6 sm:space-y-8">
+            {/* Practical Applications */}
+            {data.practical_applications && data.practical_applications.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Practical Applications</h3>
+                    <div className="grid gap-3">
+                        {data.practical_applications.map((app, i) => (
+                            <div key={i} className="flex items-start gap-3 p-3 sm:p-4 bg-[#F4F5F7] rounded-lg">
+                                <span className="w-5 h-5 sm:w-6 sm:h-6 bg-[#0052CC] text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                    {i + 1}
+                                </span>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{app}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Connections */}
+            {data.connections && data.connections.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Connections to Other Topics</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {data.connections.map((conn, i) => (
+                            <span key={i} className="px-3 py-2 bg-[#EAE6FF] text-[#403294] rounded text-xs sm:text-sm">
+                                {conn}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Critical Analysis */}
+            {data.critical_analysis && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Critical Analysis</h3>
+                    <div className="bg-[#F4F5F7] rounded-lg p-4 sm:p-5">
+                        <p className="text-[#172B4D] leading-relaxed text-sm">{data.critical_analysis}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Study Focus */}
+            {data.study_focus && data.study_focus.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Areas to Focus On</h3>
+                    <ul className="space-y-2">
+                        {data.study_focus.map((focus, i) => (
+                            <li key={i} className="flex items-center gap-3 text-[#172B4D] text-sm">
+                                <span className="w-2 h-2 bg-[#FF5630] rounded-full flex-shrink-0"></span>
+                                {focus}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {/* Mental Models */}
+            {data.mental_models && data.mental_models.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Memory Aids</h3>
+                    <div className="grid gap-3">
+                        {data.mental_models.map((model, i) => (
+                            <div key={i} className="flex items-start gap-3 p-3 sm:p-4 border border-[#DFE1E6] rounded-lg">
+                                <svg className="w-4 h-4 text-[#6B778C] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                </svg>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{model}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Start Quiz CTA */}
+            <div className="mt-6 sm:mt-8 pt-6 border-t border-[#DFE1E6]">
+                <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-6 text-center">
+                    <h3 className="text-base sm:text-lg font-semibold text-[#0747A6] mb-2">Ready to test your knowledge?</h3>
+                    <p className="text-[#42526E] mb-4 text-xs sm:text-sm">Take a quiz based on the material you just studied.</p>
+                    <Link
+                        href={`/quiz/${sessionId}`}
+                        className="inline-block px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm"
+                    >
+                        Start Quiz
+                    </Link>
+                </div>
+            </div>
         </div>
     );
 }

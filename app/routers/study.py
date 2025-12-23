@@ -32,6 +32,7 @@ class SessionResponse(BaseModel):
     title: str
     status: str
     created_at: datetime
+    pdf_filename: Optional[str] = None
     exploration_result: Optional[dict] = None
     engagement_result: Optional[dict] = None
     application_result: Optional[dict] = None
@@ -89,6 +90,7 @@ async def list_sessions(current_user: dict = Depends(get_current_user)):
             title=s["title"],
             status=s["status"],
             created_at=s["created_at"],
+            pdf_filename=s.get("pdf_filename"),
             exploration_result=s.get("exploration_result"),
             engagement_result=s.get("engagement_result"),
             application_result=s.get("application_result"),
@@ -123,6 +125,7 @@ async def get_session(
         title=session["title"],
         status=session["status"],
         created_at=session["created_at"],
+        pdf_filename=session.get("pdf_filename"),
         exploration_result=session.get("exploration_result"),
         engagement_result=session.get("engagement_result"),
         application_result=session.get("application_result"),

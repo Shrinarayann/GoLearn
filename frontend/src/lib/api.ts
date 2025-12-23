@@ -90,10 +90,38 @@ class ApiClient {
             session_id: string;
             title: string;
             status: string;
+            pdf_filename?: string;
             exploration_result?: Record<string, unknown>;
             engagement_result?: Record<string, unknown>;
             application_result?: Record<string, unknown>;
         }>(`/study/sessions/${sessionId}`, { token });
+    }
+
+    async uploadPdf(token: string, sessionId: string, file: File) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(
+            `${this.baseUrl}/study/sessions/${sessionId}/upload`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Upload failed: ${response.status}`);
+        }
+
+        return response.json() as Promise<{
+            message: string;
+            file_url: string;
+            filename: string;
+        }>;
     }
 
     async runComprehension(token: string, sessionId: string, content?: string) {

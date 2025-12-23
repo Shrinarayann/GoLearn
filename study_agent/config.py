@@ -8,7 +8,7 @@ load_dotenv()
 
 # Model configuration
 # Using gemini-2.0-flash-001 which has native PDF support
-DEFAULT_MODEL = "gemini-2.0-flash-001"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 # Agent configuration
 MAX_COMPREHENSION_ITERATIONS = 3

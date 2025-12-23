@@ -5,6 +5,10 @@ Runs ADK agents from FastAPI endpoints.
 
 from typing import Optional
 import google.generativeai as genai
+import httpx
+import tempfile
+import os
+import asyncio
 
 from ..config import settings
 
@@ -15,104 +19,133 @@ genai.configure(api_key=settings.GOOGLE_API_KEY)
 async def run_comprehension(
     content: str,
     session_id: str,
-    pdf_url: Optional[str] = None
+    pdf_url: Optional[str] = None,
+    pdf_bytes: Optional[bytes] = None
 ) -> dict:
     """
     Run the three-pass comprehension on content.
     
-    This calls Gemini directly with structured prompts for each pass,
-    rather than using the ADK orchestrator (simpler for API use).
+    Optimized to do all 3 passes in a SINGLE API call to avoid rate limits.
     
     Args:
         content: Text content to analyze
         session_id: Session ID for tracking
         pdf_url: Optional URL to PDF file
+        pdf_bytes: Optional raw PDF bytes
         
     Returns:
         dict with exploration, engagement, and application results
     """
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     
-    # Determine what to analyze
-    study_material = content if content else f"[PDF content from: {pdf_url}]"
+    # Build content parts for multimodal input
+    content_parts = []
+    uploaded_file = None
     
-    # --- Pass 1: Exploration ---
-    exploration_prompt = f"""You are performing Pass 1 (Exploration) of the Three-Pass Study Method.
+    # If we have a PDF URL, download it
+    if pdf_url and not pdf_bytes:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(pdf_url)
+                if response.status_code == 200:
+                    pdf_bytes = response.content
+        except Exception as e:
+            print(f"Failed to download PDF: {e}")
     
-Analyze the following study material and provide:
-1. Structural Overview: How is the document organized?
-2. High-Level Summary: 2-3 sentence summary
-3. Key Topics: List the main topics and concepts
-
-Study Material:
-{study_material}
-
-Respond in JSON format:
-{{
-    "structural_overview": "...",
-    "summary": "...",
-    "key_topics": ["topic1", "topic2", ...],
-    "visual_elements": ["any diagrams or charts noted"]
-}}"""
-
-    exploration_response = model.generate_content(exploration_prompt)
-    exploration_result = _parse_json_response(exploration_response.text)
+    # If we have PDF bytes, upload to Gemini
+    if pdf_bytes:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(pdf_bytes)
+            tmp_path = tmp.name
+        
+        try:
+            uploaded_file = genai.upload_file(tmp_path, mime_type="application/pdf")
+            content_parts.append(uploaded_file)
+        finally:
+            os.unlink(tmp_path)
     
-    # --- Pass 2: Engagement ---
-    engagement_prompt = f"""You are performing Pass 2 (Engagement) of the Three-Pass Study Method.
+    # Add text content if provided
+    if content:
+        content_parts.append(content)
     
-Based on the exploration results and the original material, provide a deep-dive analysis:
-1. Detailed explanations for each key topic
-2. Important definitions and formulas
-3. Examples from the material
-
-Exploration Results:
-{exploration_result}
-
-Original Material:
-{study_material}
-
-Respond in JSON format:
-{{
-    "concept_explanations": {{"topic1": "detailed explanation", ...}},
-    "definitions": {{"term": "definition", ...}},
-    "examples": ["example1", "example2", ...],
-    "key_insights": ["insight1", ...]
-}}"""
-
-    engagement_response = model.generate_content(engagement_prompt)
-    engagement_result = _parse_json_response(engagement_response.text)
+    # If no content at all, error
+    if not content_parts:
+        raise ValueError("No content provided for analysis")
     
-    # --- Pass 3: Application ---
-    application_prompt = f"""You are performing Pass 3 (Application) of the Three-Pass Study Method.
-    
-Synthesize the material for practical understanding:
-1. Practical applications of the concepts
-2. Connections to broader topics
-3. Critical analysis
-4. Study recommendations
+    # === SINGLE API CALL for all 3 passes to avoid rate limits ===
+    combined_prompt = """You are performing the Three-Pass Study Method analysis on the provided study material.
 
-Previous Analysis:
-Exploration: {exploration_result}
-Engagement: {engagement_result}
+Complete ALL THREE PASSES in your response:
 
-Respond in JSON format:
-{{
-    "practical_applications": ["application1", ...],
-    "connections": ["connection to other topics", ...],
-    "critical_analysis": "strengths and weaknesses of the material",
-    "study_focus": ["areas to focus on for mastery", ...],
-    "mental_models": ["memory aids or frameworks", ...]
-}}"""
+## PASS 1: EXPLORATION
+Analyze the structure and provide:
+- Structural Overview: How is the document organized?
+- High-Level Summary: 2-3 sentence summary
+- Key Topics: List the main topics and concepts
+- Visual Elements: Any diagrams or charts noted
 
-    application_response = model.generate_content(application_prompt)
-    application_result = _parse_json_response(application_response.text)
-    
-    return {
-        "exploration": exploration_result,
-        "engagement": engagement_result,
-        "application": application_result,
+## PASS 2: ENGAGEMENT  
+Deep-dive analysis:
+- Detailed explanations for each key topic
+- Important definitions and formulas
+- Examples from the material
+- Key insights
+
+## PASS 3: APPLICATION
+Practical synthesis:
+- Practical applications of the concepts
+- Connections to broader topics
+- Critical analysis (strengths/weaknesses)
+- Study focus areas for mastery
+- Mental models or memory aids
+
+Respond in this exact JSON format:
+{
+    "exploration": {
+        "structural_overview": "...",
+        "summary": "...",
+        "key_topics": ["topic1", "topic2"],
+        "visual_elements": ["..."]
+    },
+    "engagement": {
+        "concept_explanations": {"topic1": "explanation", "topic2": "explanation"},
+        "definitions": {"term1": "definition"},
+        "examples": ["example1", "example2"],
+        "key_insights": ["insight1", "insight2"]
+    },
+    "application": {
+        "practical_applications": ["application1"],
+        "connections": ["connection1"],
+        "critical_analysis": "strengths and weaknesses",
+        "study_focus": ["focus area 1"],
+        "mental_models": ["memory aid 1"]
     }
+}"""
+
+    response = model.generate_content(content_parts + [combined_prompt])
+    result = _parse_json_response(response.text)
+    
+    # Clean up uploaded file
+    if uploaded_file:
+        try:
+            genai.delete_file(uploaded_file.name)
+        except Exception:
+            pass
+    
+    # Extract the three sections
+    if "exploration" in result and "engagement" in result and "application" in result:
+        return {
+            "exploration": result["exploration"],
+            "engagement": result["engagement"],
+            "application": result["application"],
+        }
+    else:
+        # Fallback if structure is different
+        return {
+            "exploration": result.get("exploration", result),
+            "engagement": result.get("engagement", {}),
+            "application": result.get("application", {}),
+        }
 
 
 async def generate_questions(
@@ -123,15 +156,6 @@ async def generate_questions(
 ) -> list:
     """
     Generate quiz questions from comprehension results.
-    
-    Args:
-        exploration: Pass 1 results
-        engagement: Pass 2 results
-        application: Pass 3 results
-        session_id: Session ID
-        
-    Returns:
-        List of question dicts
     """
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     
@@ -155,14 +179,12 @@ Respond as a JSON array:
         "difficulty": "easy|medium|hard",
         "concept": "which topic this tests",
         "explanation": "why this is the correct answer"
-    }},
-    ...
+    }}
 ]"""
 
     response = model.generate_content(prompt)
     questions = _parse_json_response(response.text)
     
-    # Ensure it's a list
     if isinstance(questions, dict):
         questions = [questions]
     
@@ -178,16 +200,6 @@ async def evaluate_answer(
 ) -> dict:
     """
     Evaluate a user's answer and provide feedback if incorrect.
-    
-    Args:
-        user_answer: What the user answered
-        correct_answer: The expected answer
-        question: The question text
-        concept: The concept being tested
-        engagement_result: Pass 2 results for re-explanation
-        
-    Returns:
-        dict with correct (bool) and optional feedback
     """
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     
@@ -229,7 +241,6 @@ def _parse_json_response(text: str) -> dict:
     """Parse JSON from LLM response, handling markdown code blocks."""
     import json
     
-    # Remove markdown code blocks if present
     text = text.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -241,5 +252,4 @@ def _parse_json_response(text: str) -> dict:
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
-        # Return as-is in a dict if can't parse
         return {"raw_response": text}

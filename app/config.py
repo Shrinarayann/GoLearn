@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Google/Gemini
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
-    GEMINI_MODEL: str = "gemini-2.0-flash-001"
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     
     # Firebase
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")

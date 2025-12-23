@@ -9,6 +9,7 @@ env/
 .venv/
 .env*
 firebase-credentials.json
+config.py
 # Distribution / packaging
 build/
 dist/
