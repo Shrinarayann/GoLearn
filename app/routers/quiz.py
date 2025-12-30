@@ -6,7 +6,7 @@ Handles question generation, answers, and Leitner box management.
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..dependencies import get_current_user
 from ..services.firebase import FirestoreService
@@ -101,6 +101,7 @@ async def generate_quiz(
     
     # Save questions to Firestore
     saved_questions = []
+    now = datetime.utcnow()
     for q in questions:
         q_data = {
             "session_id": session_id,
@@ -111,7 +112,9 @@ async def generate_quiz(
             "concept": q.get("concept", "general"),
             "explanation": q.get("explanation", ""),
             "leitner_box": 1,  # All start in Box 1
-            "created_at": datetime.utcnow(),
+            "created_at": now,
+            "next_review_at": now, # Immediately due
+            "times_reviewed": 0
         }
         question_id = await db.create_question(q_data)
         saved_questions.append(QuestionResponse(
@@ -149,6 +152,34 @@ async def get_questions(
     
     questions = await db.get_session_questions(session_id, due_only=due_only)
     
+    # Double check due date logic just in case DB doesn't filter perfectly
+    if due_only:
+        # Add a small buffer (5 seconds) to handle timing precision issues
+        now = datetime.utcnow() + timedelta(seconds=5)
+        filtered_questions = []
+        for q in questions:
+            review_date = q.get("next_review_at")
+            is_due = False
+            
+            if review_date is None:
+                is_due = True
+            elif isinstance(review_date, datetime):
+                # Remove timezone info for comparison if present
+                review_naive = review_date.replace(tzinfo=None) if review_date.tzinfo else review_date
+                is_due = review_naive <= now
+            elif isinstance(review_date, str):
+                try:
+                    dt = datetime.fromisoformat(review_date.replace('Z', '+00:00'))
+                    dt_naive = dt.replace(tzinfo=None)
+                    is_due = dt_naive <= now
+                except:
+                    is_due = True
+                    
+            if is_due:
+                filtered_questions.append(q)
+        
+        questions = filtered_questions
+
     return [
         QuestionResponse(
             question_id=q["question_id"],
@@ -196,17 +227,32 @@ async def submit_answer(
         engagement_result=session.get("engagement_result", {})
     )
     
-    # Calculate new Leitner box
+    # Calculate new Leitner box and next review date
     current_box = question.get("leitner_box", 1)
+    
+    # Leitner Intervals (in days)
+    # Box 1: 1 day
+    # Box 2: 2 days
+    # Box 3: 4 days
+    # Box 4: 7 days
+    # Box 5: 14 days
+    intervals = {1: 1, 2: 2, 3: 4, 4: 7, 5: 14}
+    
     if result["correct"]:
         new_box = min(current_box + 1, 5)  # Promote, max Box 5
+        # Schedule for future review based on new box
+        days_to_add = intervals.get(new_box, 1)
+        next_review = datetime.utcnow() + timedelta(days=days_to_add)
     else:
         new_box = 1  # Demote to Box 1
+        # Incorrect answers are immediately due for review
+        next_review = datetime.utcnow()
     
     # Update question
     await db.update_question(question_id, {
         "leitner_box": new_box,
         "last_reviewed": datetime.utcnow(),
+        "next_review_at": next_review,
         "times_reviewed": question.get("times_reviewed", 0) + 1,
     })
     
@@ -240,21 +286,43 @@ async def get_progress(
     
     # Calculate box distribution
     box_distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    due_count = 0
+    # Add a small buffer (5 seconds) to handle timing precision issues
+    now = datetime.utcnow() + timedelta(seconds=5)
+    
     for q in questions:
         box = q.get("leitner_box", 1)
         box_distribution[box] = box_distribution.get(box, 0) + 1
+        
+        # Check if due
+        review_date = q.get("next_review_at")
+        is_due = False
+        if review_date is None:
+            is_due = True
+        elif isinstance(review_date, datetime):
+            # Remove timezone info for comparison if present
+            review_naive = review_date.replace(tzinfo=None) if review_date.tzinfo else review_date
+            is_due = review_naive <= now
+        elif isinstance(review_date, str):
+             # Basic ISO parsing
+             try:
+                 dt = datetime.fromisoformat(review_date.replace('Z', '+00:00'))
+                 dt_naive = dt.replace(tzinfo=None)
+                 is_due = dt_naive <= now
+             except:
+                 is_due = True # Default to due if invalid date
+                 
+        if is_due:
+            due_count += 1
     
     total = len(questions)
     mastered = box_distribution.get(5, 0)
     mastery_pct = (mastered / total * 100) if total > 0 else 0
-    
-    # Calculate due for review (Box 1 is always due)
-    due = box_distribution.get(1, 0)
     
     return ProgressResponse(
         session_id=session_id,
         total_concepts=total,
         box_distribution=box_distribution,
         mastery_percentage=round(mastery_pct, 1),
-        due_for_review=due,
+        due_for_review=due_count,
     )

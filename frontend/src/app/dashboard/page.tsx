@@ -13,6 +13,12 @@ interface Session {
     created_at: string;
 }
 
+interface SessionProgress {
+    due_for_review: number;
+    total_concepts: number;
+    mastery_percentage: number;
+}
+
 export default function DashboardPage() {
     const { user, token, loading, signOut } = useAuth();
     const router = useRouter();
@@ -21,6 +27,7 @@ export default function DashboardPage() {
     const [newTitle, setNewTitle] = useState("");
     const [creating, setCreating] = useState(false);
     const [showModal, setShowModal] = useState(false);
+    const [progressData, setProgressData] = useState<Record<string, SessionProgress>>({});
 
     useEffect(() => {
         if (!loading && !user) {
@@ -33,12 +40,33 @@ export default function DashboardPage() {
         try {
             const data = await api.getSessions(token);
             setSessions(data);
+            // Load progress for quizzing sessions
+            await loadProgress(data);
         } catch (error) {
             console.error("Failed to load sessions:", error);
         } finally {
             setLoadingSessions(false);
         }
     }, [token]);
+
+    const loadProgress = async (sessionList: Session[]) => {
+        if (!token) return;
+        const quizzingSessions = sessionList.filter(s => s.status === "quizzing");
+        const progressMap: Record<string, SessionProgress> = {};
+
+        await Promise.all(
+            quizzingSessions.map(async (session) => {
+                try {
+                    const progress = await api.getProgress(token, session.session_id);
+                    progressMap[session.session_id] = progress;
+                } catch (error) {
+                    console.error(`Failed to load progress for ${session.session_id}:`, error);
+                }
+            })
+        );
+
+        setProgressData(progressMap);
+    };
 
     useEffect(() => {
         if (token) {
@@ -176,19 +204,38 @@ export default function DashboardPage() {
                     <>
                         {/* Mobile Cards View */}
                         <div className="sm:hidden space-y-3">
-                            {sessions.map((session) => (
-                                <Link
-                                    key={session.session_id}
-                                    href={`/study/${session.session_id}`}
-                                    className="block bg-white rounded-lg border border-[#DFE1E6] p-4 hover:border-[#0052CC] transition-colors"
-                                >
-                                    <div className="flex items-start justify-between gap-3 mb-2">
-                                        <h4 className="font-medium text-[#172B4D]">{session.title}</h4>
-                                        {getStatusBadge(session.status)}
+                            {sessions.map((session) => {
+                                const progress = progressData[session.session_id];
+                                const hasDue = progress && progress.due_for_review > 0;
+
+                                return (
+                                    <div key={session.session_id} className="bg-white rounded-lg border border-[#DFE1E6] p-4">
+                                        <Link
+                                            href={`/study/${session.session_id}`}
+                                            className="block hover:opacity-80 transition-opacity"
+                                        >
+                                            <div className="flex items-start justify-between gap-3 mb-2">
+                                                <h4 className="font-medium text-[#172B4D]">{session.title}</h4>
+                                                {getStatusBadge(session.status)}
+                                            </div>
+                                            <p className="text-xs text-[#6B778C]">{formatDate(session.created_at)}</p>
+                                        </Link>
+                                        {hasDue && (
+                                            <div className="mt-3 pt-3 border-t border-[#DFE1E6] flex items-center justify-between gap-2">
+                                                <span className="text-xs text-[#6B778C]">
+                                                    {progress.due_for_review} card{progress.due_for_review !== 1 ? 's' : ''} due
+                                                </span>
+                                                <Link
+                                                    href={`/quiz/${session.session_id}?mode=review`}
+                                                    className="px-3 py-1.5 bg-[#FF8B00] text-white rounded text-xs font-medium hover:bg-[#FF991F] transition-colors"
+                                                >
+                                                    Review Now
+                                                </Link>
+                                            </div>
+                                        )}
                                     </div>
-                                    <p className="text-xs text-[#6B778C]">{formatDate(session.created_at)}</p>
-                                </Link>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         {/* Desktop Table View */}
@@ -209,35 +256,55 @@ export default function DashboardPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {sessions.map((session) => (
-                                        <tr
-                                            key={session.session_id}
-                                            className="border-b border-[#DFE1E6] hover:bg-[#FAFBFC] transition-colors"
-                                        >
-                                            <td className="px-4 py-4">
-                                                <Link
-                                                    href={`/study/${session.session_id}`}
-                                                    className="text-[#0052CC] font-medium hover:underline"
-                                                >
-                                                    {session.title}
-                                                </Link>
-                                            </td>
-                                            <td className="px-4 py-4">
-                                                {getStatusBadge(session.status)}
-                                            </td>
-                                            <td className="px-4 py-4 text-sm text-[#6B778C]">
-                                                {formatDate(session.created_at)}
-                                            </td>
-                                            <td className="px-4 py-4 text-right">
-                                                <Link
-                                                    href={`/study/${session.session_id}`}
-                                                    className="text-sm text-[#6B778C] hover:text-[#0052CC] transition-colors"
-                                                >
-                                                    Open
-                                                </Link>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {sessions.map((session) => {
+                                        const progress = progressData[session.session_id];
+                                        const hasDue = progress && progress.due_for_review > 0;
+
+                                        return (
+                                            <tr
+                                                key={session.session_id}
+                                                className="border-b border-[#DFE1E6] hover:bg-[#FAFBFC] transition-colors"
+                                            >
+                                                <td className="px-4 py-4">
+                                                    <Link
+                                                        href={`/study/${session.session_id}`}
+                                                        className="text-[#0052CC] font-medium hover:underline"
+                                                    >
+                                                        {session.title}
+                                                    </Link>
+                                                    {hasDue && (
+                                                        <div className="text-xs text-[#FF8B00] mt-1">
+                                                            {progress.due_for_review} due for review
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    {getStatusBadge(session.status)}
+                                                </td>
+                                                <td className="px-4 py-4 text-sm text-[#6B778C]">
+                                                    {formatDate(session.created_at)}
+                                                </td>
+                                                <td className="px-4 py-4 text-right">
+                                                    <div className="flex items-center justify-end gap-4">
+                                                        {hasDue && (
+                                                            <Link
+                                                                href={`/quiz/${session.session_id}?mode=review`}
+                                                                className="px-3 py-1.5 bg-[#FF8B00] text-white rounded text-xs font-medium hover:bg-[#FF991F] transition-colors"
+                                                            >
+                                                                Review
+                                                            </Link>
+                                                        )}
+                                                        <Link
+                                                            href={`/study/${session.session_id}`}
+                                                            className="text-sm text-[#6B778C] hover:text-[#0052CC] transition-colors"
+                                                        >
+                                                            Open
+                                                        </Link>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>

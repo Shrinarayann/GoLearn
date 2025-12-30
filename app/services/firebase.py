@@ -141,9 +141,9 @@ class FirestoreService:
             .where("session_id", "==", session_id)
         )
         
-        if due_only:
-            # For simplicity, return Box 1 questions (always due)
-            query = query.where("leitner_box", "==", 1)
+        # Note: We don't filter by date here because Firestore datetime queries
+        # can be complex. Instead, we return all questions and filter in the
+        # application layer (in quiz.py) based on next_review_at
         
         docs = query.stream()
         questions = []

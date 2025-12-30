@@ -153,7 +153,8 @@ class ApiClient {
         });
     }
 
-    async getQuestions(token: string, sessionId: string) {
+    async getQuestions(token: string, sessionId: string, dueOnly: boolean = false) {
+        const url = `/quiz/sessions/${sessionId}/questions${dueOnly ? "?due_only=true" : ""}`;
         return this.request<Array<{
             question_id: string;
             question: string;
@@ -161,7 +162,7 @@ class ApiClient {
             difficulty: string;
             concept: string;
             leitner_box: number;
-        }>>(`/quiz/sessions/${sessionId}/questions`, { token });
+        }>>(url, { token });
     }
 
     async submitAnswer(token: string, questionId: string, answer: string) {

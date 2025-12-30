@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
@@ -27,7 +27,9 @@ export default function QuizPage() {
     const { user, token, loading } = useAuth();
     const router = useRouter();
     const params = useParams();
+    const searchParams = useSearchParams();
     const sessionId = params.id as string;
+    const isReviewMode = searchParams.get("mode") === "review";
 
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -55,14 +57,18 @@ export default function QuizPage() {
         if (questions.length > 0) return;
 
         try {
-            const data = await api.getQuestions(token, sessionId);
+            // In review mode, fetch only due questions
+            const data = await api.getQuestions(token, sessionId, isReviewMode);
             if (data.length > 0) {
                 setQuestions(data);
-            } else {
+            } else if (!isReviewMode) {
+                // Only generate new quiz if not in review mode
                 generateQuiz();
             }
         } catch (error) {
-            generateQuiz();
+            if (!isReviewMode) {
+                generateQuiz();
+            }
         }
     };
 
@@ -149,6 +155,11 @@ export default function QuizPage() {
                             <span className="sm:hidden">← Back</span>
                         </Link>
                         <div className="flex items-center gap-2 sm:gap-4">
+                            {isReviewMode && (
+                                <span className="px-2 py-1 bg-[#FF8B00] text-white rounded text-xs font-medium">
+                                    Review Mode
+                                </span>
+                            )}
                             <span className="text-xs sm:text-sm text-[#6B778C]">
                                 {currentIndex + 1}/{questions.length}
                             </span>
