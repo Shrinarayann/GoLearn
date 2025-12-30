@@ -1,0 +1,4 @@
+# This directory stores agent LLM output logs
+# See ../LOGGING.md for details
+
+# Log files are excluded from git via .gitignore

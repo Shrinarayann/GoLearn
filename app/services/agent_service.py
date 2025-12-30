@@ -9,11 +9,50 @@ import httpx
 import tempfile
 import os
 import asyncio
+import logging
+import json
+from datetime import datetime
 
 from ..config import settings
 
-# Configure Gemini
+# Import ADK agents
+from study_agent.comprehension.exploration_agent import exploration_agent
+from study_agent.comprehension.engagement_agent import engagement_agent
+from study_agent.comprehension.application_agent import application_agent
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Create logs directory if it doesn't exist
+logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
+os.makedirs(logs_dir, exist_ok=True)
+
+# Configure logging to both file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(logs_dir, 'agent_outputs.log')),
+        logging.StreamHandler()
+    ]
+)
+
+# Configure Gemini (still needed for fallback/testing)
 genai.configure(api_key=settings.GOOGLE_API_KEY)
+
+# Load agent prompts from study_agent/prompts/
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'study_agent', 'prompts')
+
+def _load_prompt(filename: str) -> str:
+    """Load prompt template from file."""
+    path = os.path.join(PROMPTS_DIR, filename)
+    with open(path, 'r') as f:
+        return f.read()
+
+# Load the actual agent prompts
+EXPLORATION_PROMPT = _load_prompt('exploration.txt')
+ENGAGEMENT_PROMPT = _load_prompt('engagement.txt')
+APPLICATION_PROMPT = _load_prompt('application.txt')
 
 
 async def run_comprehension(
@@ -72,58 +111,54 @@ async def run_comprehension(
     if not content_parts:
         raise ValueError("No content provided for analysis")
     
-    # === SINGLE API CALL for all 3 passes to avoid rate limits ===
-    combined_prompt = """You are performing the Three-Pass Study Method analysis on the provided study material.
-
-Complete ALL THREE PASSES in your response:
-
-## PASS 1: EXPLORATION
-Analyze the structure and provide:
-- Structural Overview: How is the document organized?
-- High-Level Summary: 2-3 sentence summary
-- Key Topics: List the main topics and concepts
-- Visual Elements: Any diagrams or charts noted
-
-## PASS 2: ENGAGEMENT  
-Deep-dive analysis:
-- Detailed explanations for each key topic
-- Important definitions and formulas
-- Examples from the material
-- Key insights
-
-## PASS 3: APPLICATION
-Practical synthesis:
-- Practical applications of the concepts
-- Connections to broader topics
-- Critical analysis (strengths/weaknesses)
-- Study focus areas for mastery
-- Mental models or memory aids
-
-Respond in this exact JSON format:
-{
-    "exploration": {
-        "structural_overview": "...",
-        "summary": "...",
-        "key_topics": ["topic1", "topic2"],
-        "visual_elements": ["..."]
-    },
-    "engagement": {
-        "concept_explanations": {"topic1": "explanation", "topic2": "explanation"},
-        "definitions": {"term1": "definition"},
-        "examples": ["example1", "example2"],
-        "key_insights": ["insight1", "insight2"]
-    },
-    "application": {
-        "practical_applications": ["application1"],
-        "connections": ["connection1"],
-        "critical_analysis": "strengths and weaknesses",
-        "study_focus": ["focus area 1"],
-        "mental_models": ["memory aid 1"]
+    logger.info(f"\n{'='*80}\nSTARTING THREE-PASS ANALYSIS (Session: {session_id})\n{'='*80}")
+    logger.info(f"Model: {settings.GEMINI_MODEL}")
+    logger.info(f"Content length: {len(content) if content else 0} chars")
+    logger.info(f"Has PDF: {pdf_bytes is not None}")
+    
+    # === Run three separate agent passes using actual ADK prompts ===
+    
+    # PASS 1: EXPLORATION
+    logger.info(f"\n{'-'*80}\nPASS 1: EXPLORATION AGENT\n{'-'*80}")
+    exploration_response = model.generate_content(content_parts + [EXPLORATION_PROMPT])
+    logger.info(f"Raw Response:\n{exploration_response.text}\n")
+    exploration_result = _parse_json_response(exploration_response.text)
+    
+    # PASS 2: ENGAGEMENT (with context from exploration)
+    logger.info(f"\n{'-'*80}\nPASS 2: ENGAGEMENT AGENT\n{'-'*80}")
+    engagement_prompt_with_context = ENGAGEMENT_PROMPT.replace(
+        "{exploration_result}", 
+        json.dumps(exploration_result, indent=2)
+    )
+    engagement_response = model.generate_content(content_parts + [engagement_prompt_with_context])
+    logger.info(f"Raw Response:\n{engagement_response.text}\n")
+    engagement_result = _parse_json_response(engagement_response.text)
+    
+    # PASS 3: APPLICATION (with context from previous passes)
+    logger.info(f"\n{'-'*80}\nPASS 3: APPLICATION AGENT\n{'-'*80}")
+    application_prompt_with_context = APPLICATION_PROMPT.replace(
+        "{exploration_result}",
+        json.dumps(exploration_result, indent=2)
+    ).replace(
+        "{engagement_result}",
+        json.dumps(engagement_result, indent=2)
+    )
+    application_response = model.generate_content(content_parts + [application_prompt_with_context])
+    logger.info(f"Raw Response:\n{application_response.text}\n")
+    application_result = _parse_json_response(application_response.text)
+    
+    # Log summary
+    logger.info(f"\n{'='*80}\nCOMPREHENSION COMPLETE (Session: {session_id})\n{'='*80}")
+    logger.info(f"Exploration keys: {list(exploration_result.keys())}")
+    logger.info(f"Engagement keys: {list(engagement_result.keys())}")
+    logger.info(f"Application keys: {list(application_result.keys())}")
+    logger.info(f"{'='*80}\n")
+    
+    result = {
+        "exploration": exploration_result,
+        "engagement": engagement_result,
+        "application": application_result
     }
-}"""
-
-    response = model.generate_content(content_parts + [combined_prompt])
-    result = _parse_json_response(response.text)
     
     # Clean up uploaded file
     if uploaded_file:
@@ -132,20 +167,7 @@ Respond in this exact JSON format:
         except Exception:
             pass
     
-    # Extract the three sections
-    if "exploration" in result and "engagement" in result and "application" in result:
-        return {
-            "exploration": result["exploration"],
-            "engagement": result["engagement"],
-            "application": result["application"],
-        }
-    else:
-        # Fallback if structure is different
-        return {
-            "exploration": result.get("exploration", result),
-            "engagement": result.get("engagement", {}),
-            "application": result.get("application", {}),
-        }
+    return result
 
 
 async def generate_questions(
@@ -183,7 +205,19 @@ Respond as a JSON array:
 ]"""
 
     response = model.generate_content(prompt)
+    
+    # Log the raw LLM response
+    logger.info(f"\n{'='*80}\nQUESTION GENERATION AGENT OUTPUT (Session: {session_id})\n{'='*80}")
+    logger.info(f"Model: {settings.GEMINI_MODEL}")
+    logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    logger.info(f"\nRaw LLM Response:\n{'-'*80}\n{response.text}\n{'-'*80}")
+    
     questions = _parse_json_response(response.text)
+    
+    # Log parsed results
+    logger.info(f"\nParsed Results:")
+    logger.info(f"- Number of questions generated: {len(questions) if isinstance(questions, list) else 1}")
+    logger.info(f"{'='*80}\n")
     
     if isinstance(questions, dict):
         questions = [questions]
@@ -218,7 +252,22 @@ Respond in JSON:
 }}"""
 
     response = model.generate_content(prompt)
+    
+    # Log the raw LLM response
+    logger.info(f"\n{'='*80}\nANSWER EVALUATION AGENT OUTPUT\n{'='*80}")
+    logger.info(f"Model: {settings.GEMINI_MODEL}")
+    logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    logger.info(f"Question: {question}")
+    logger.info(f"User Answer: {user_answer}")
+    logger.info(f"\nRaw LLM Response:\n{'-'*80}\n{response.text}\n{'-'*80}")
+    
     result = _parse_json_response(response.text)
+    
+    # Log parsed results
+    logger.info(f"\nParsed Results:")
+    logger.info(f"- Correct: {result.get('correct', False)}")
+    logger.info(f"- Explanation length: {len(result.get('explanation', ''))}")
+    logger.info(f"{'='*80}\n")
     
     # If incorrect, generate feedback
     if not result.get("correct", False):
@@ -232,6 +281,15 @@ Provide a brief, encouraging re-explanation of the concept.
 Be supportive and use simple terms. Max 3 sentences."""
 
         feedback_response = model.generate_content(feedback_prompt)
+        
+        # Log feedback generation
+        logger.info(f"\n{'='*80}\nFEEDBACK AGENT OUTPUT\n{'='*80}")
+        logger.info(f"Model: {settings.GEMINI_MODEL}")
+        logger.info(f"Timestamp: {datetime.now().isoformat()}")
+        logger.info(f"Concept: {concept}")
+        logger.info(f"\nRaw LLM Response:\n{'-'*80}\n{feedback_response.text}\n{'-'*80}")
+        logger.info(f"{'='*80}\n")
+        
         result["feedback"] = feedback_response.text
     
     return result

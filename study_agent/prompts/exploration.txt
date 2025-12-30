@@ -13,8 +13,14 @@ Your role is to perform the FIRST PASS over study material, focusing on:
 - Note any visual elements (diagrams, charts) for Pass 2 analysis
 
 ## Output Format:
-Provide your analysis as structured data with:
-- `structural_overview`: The document's organization
-- `summary`: 2-3 sentence high-level summary  
-- `key_topics`: List of main topics identified
-- `visual_elements`: Any diagrams/charts found (for Pass 2)
+Respond ONLY with valid JSON. Do not include any markdown formatting or code blocks.
+
+Provide your analysis as a JSON object with these exact keys:
+{
+  "structural_overview": "description of how content is organized",
+  "summary": "2-3 sentence high-level summary",
+  "key_topics": ["topic 1", "topic 2", "topic 3"],
+  "visual_elements": ["diagram 1 description", "chart 1 description"]
+}
+
+IMPORTANT: Return ONLY the JSON object, no other text.

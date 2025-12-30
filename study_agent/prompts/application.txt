@@ -21,9 +21,15 @@ You have access to:
 - Create mental models that aid memory and understanding
 
 ## Output Format:
-Provide your synthesis with:
-- `practical_applications`: Real-world use cases and scenarios
-- `critical_analysis`: Strengths, weaknesses, open questions
-- `connections`: Links to other topics, prerequisites, and related fields
-- `study_focus`: Recommended areas for deeper study or testing
-- `mental_models`: Memory aids, analogies, or frameworks
+Respond ONLY with valid JSON. Do not include any markdown formatting or code blocks.
+
+Provide your synthesis as a JSON object with these exact keys:
+{
+  "practical_applications": ["application 1", "application 2", "application 3"],
+  "critical_analysis": "detailed analysis paragraph",
+  "connections": ["connection 1", "connection 2", "connection 3"],
+  "study_focus": ["focus area 1", "focus area 2", "focus area 3"],
+  "mental_models": ["memory aid 1", "memory aid 2", "memory aid 3"]
+}
+
+IMPORTANT: Return ONLY the JSON object, no other text.

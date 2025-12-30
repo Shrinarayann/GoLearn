@@ -20,8 +20,20 @@ You have access to:
 - For visual elements, describe what they show and why they matter
 
 ## Output Format:
-Provide your analysis with:
-- `concept_explanations`: Detailed explanation for each key topic
-- `diagram_interpretations`: Analysis of visual elements (if any)
-- `definitions`: Important terms and their meanings
-- `examples`: Key examples with explanations
+Respond ONLY with valid JSON. Do not include any markdown formatting or code blocks.
+
+Provide your analysis as a comprehensive JSON object with these exact keys:
+{
+  "summary": "brief overview",
+  "detailed_analysis": "comprehensive paragraph",
+  "concept_explanations": {"topic1": "detailed explanation", "topic2": "..."},
+  "diagram_interpretations": {"diagram_name": "what it shows and why it matters"},
+  "definitions": {"term1": "definition", "term2": "..."},
+  "formulas": {"formula_name": "formula with explanation"},
+  "examples": ["concrete example 1", "example 2"],
+  "relationships": ["how concept A relates to B", "how C builds on D"],
+  "misconceptions": ["common mistake 1", "pitfall 2"],
+  "key_insights": ["insight1", "insight2"]
+}
+
+IMPORTANT: Return ONLY the JSON object, no other text.
