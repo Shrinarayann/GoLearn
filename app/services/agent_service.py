@@ -191,6 +191,42 @@ Respond as a JSON array:
     return questions if isinstance(questions, list) else []
 
 
+async def generate_single_question(
+    concept: str,
+    exploration: dict,
+    engagement: dict,
+    application: dict,
+    difficulty: str = "medium"
+) -> dict:
+    """
+    Generate a SINGLE fresh question for a specific concept.
+    Used for spaced repetition reviews where we want new questions each time.
+    """
+    model = genai.GenerativeModel(settings.GEMINI_MODEL)
+    
+    prompt = f"""Based on the study analysis below, generate ONE new quiz question specifically for the concept: "{concept}".
+    
+    The question should be different from basic recall if possible, focusing on understanding or application.
+    
+    Study Context:
+    Exploration: {exploration}
+    Engagement: {engagement}
+    Application: {application}
+    
+    Respond in JSON format:
+    {{
+        "question": "...",
+        "correct_answer": "...",
+        "type": "recall|understanding|application",
+        "difficulty": "{difficulty}",
+        "concept": "{concept}",
+        "explanation": "..."
+    }}"""
+
+    response = model.generate_content(prompt)
+    return _parse_json_response(response.text)
+
+
 async def evaluate_answer(
     user_answer: str,
     correct_answer: str,

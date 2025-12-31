@@ -156,3 +156,45 @@ class FirestoreService:
     async def update_question(self, question_id: str, data: dict) -> None:
         """Update a quiz question."""
         self.db.collection("quiz_questions").document(question_id).update(data)
+
+    # --- Quiz Concepts (SRS Tracking) ---
+
+    async def get_concept(self, session_id: str, concept_name: str) -> Optional[dict]:
+        """Get SRS tracking for a specific concept in a session."""
+        docs = (
+            self.db.collection("quiz_concepts")
+            .where("session_id", "==", session_id)
+            .where("concept_name", "==", concept_name)
+            .limit(1)
+            .stream()
+        )
+        for doc in docs:
+            data = doc.to_dict()
+            data["concept_id"] = doc.id
+            return data
+        return None
+
+    async def get_session_concepts(self, session_id: str) -> List[dict]:
+        """Get all SRS tracked concepts for a session."""
+        docs = (
+            self.db.collection("quiz_concepts")
+            .where("session_id", "==", session_id)
+            .stream()
+        )
+        concepts = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["concept_id"] = doc.id
+            concepts.append(data)
+        return concepts
+
+    async def create_concept(self, concept_data: dict) -> str:
+        """Create SRS tracking for a concept."""
+        doc_ref = self.db.collection("quiz_concepts").document()
+        doc_ref.set(concept_data)
+        return doc_ref.id
+
+    async def update_concept(self, concept_id: str, data: dict) -> None:
+        """Update SRS tracking for a concept."""
+        self.db.collection("quiz_concepts").document(concept_id).update(data)
+

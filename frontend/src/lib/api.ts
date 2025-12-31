@@ -146,6 +146,8 @@ class ApiClient {
             question_type: string;
             difficulty: string;
             concept: string;
+            stability: number;
+            fsrs_difficulty: number;
             leitner_box: number;
         }>>(`/quiz/sessions/${sessionId}/generate`, {
             method: "POST",
@@ -161,6 +163,8 @@ class ApiClient {
             question_type: string;
             difficulty: string;
             concept: string;
+            stability: number;
+            fsrs_difficulty: number;
             leitner_box: number;
         }>>(url, { token });
     }
@@ -170,7 +174,9 @@ class ApiClient {
             correct: boolean;
             correct_answer: string;
             explanation: string;
-            new_leitner_box: number;
+            new_stability: number;
+            new_difficulty: number;
+            next_review_at: string;
             feedback?: string;
         }>(`/quiz/questions/${questionId}/answer`, {
             method: "POST",

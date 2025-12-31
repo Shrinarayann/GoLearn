@@ -12,6 +12,8 @@ interface Question {
     question_type: string;
     difficulty: string;
     concept: string;
+    stability: number;
+    fsrs_difficulty: number;
     leitner_box: number;
 }
 
@@ -19,7 +21,9 @@ interface AnswerResult {
     correct: boolean;
     correct_answer: string;
     explanation: string;
-    new_leitner_box: number;
+    new_stability: number;
+    new_difficulty: number;
+    next_review_at: string;
     feedback?: string;
 }
 
@@ -144,6 +148,14 @@ export default function QuizPage() {
         }
     };
 
+    const getStabilityBox = (s: number) => {
+        if (s < 1) return 1;
+        if (s < 3) return 2;
+        if (s < 7) return 3;
+        if (s < 14) return 4;
+        return 5;
+    };
+
     return (
         <div className="min-h-screen bg-[#FAFBFC]">
             {/* Header */}
@@ -223,7 +235,7 @@ export default function QuizPage() {
                                     {currentQuestion.difficulty}
                                 </span>
                                 <span className="px-2 py-0.5 bg-[#F4F5F7] text-[#6B778C] rounded text-xs font-medium">
-                                    Box {currentQuestion.leitner_box}
+                                    Box {getStabilityBox(currentQuestion.stability)}
                                 </span>
                             </div>
                             <h2 className="text-base sm:text-lg font-medium text-[#172B4D] leading-relaxed">
@@ -272,7 +284,7 @@ export default function QuizPage() {
                                             <span className={`font-semibold ${result.correct ? "text-[#006644]" : "text-[#DE350B]"}`}>
                                                 {result.correct ? "Correct!" : "Incorrect"}
                                             </span>
-                                            <span className="text-xs sm:text-sm text-[#6B778C]">→ Box {result.new_leitner_box}</span>
+                                            <span className="text-xs sm:text-sm text-[#6B778C]">→ Box {getStabilityBox(result.new_stability)}</span>
                                         </div>
                                         {!result.correct && (
                                             <p className="text-[#172B4D] text-sm">
