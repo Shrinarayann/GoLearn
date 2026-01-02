@@ -8,17 +8,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import auth, study, quiz, dashboard, feynman
+from .routers import auth, study, quiz, dashboard
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
-    print("GoLearn API starting...")
+    print("🚀 GoLearn API starting...")
     yield
     # Shutdown
-    print("GoLearn API shutting down...")
+    print("👋 GoLearn API shutting down...")
 
 
 app = FastAPI(
@@ -42,7 +42,6 @@ app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(study.router, prefix="/study", tags=["Study Sessions"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz & Retention"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
-app.include_router(feynman.router, prefix="/feynman", tags=["Feynman Technique"])
 
 
 @app.get("/")

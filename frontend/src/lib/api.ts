@@ -244,59 +244,6 @@ class ApiClient {
             }>;
         }>("/dashboard/data", { token });
     }
-
-    async sendFeynmanMessage(token: string, sessionId: string, message: string, topic?: string) {
-        let endpoint = `/feynman/sessions/${sessionId}/chat`;
-        if (topic) {
-            const params = new URLSearchParams();
-            params.append("topic", topic);
-            endpoint += `?${params.toString()}`;
-        }
-
-        return this.request<{
-            response: string;
-        }>(endpoint, {
-            method: "POST",
-            token,
-            body: { message },
-        });
-    }
-
-    async getFeynmanGreeting(token: string, sessionId: string, topic?: string) {
-        let endpoint = `/feynman/sessions/${sessionId}/greeting`;
-        if (topic) {
-            const params = new URLSearchParams();
-            params.append("topic", topic);
-            endpoint += `?${params.toString()}`;
-        }
-
-        return this.request<{
-            response: string;
-        }>(endpoint, { token });
-    }
-
-    async getFeynmanTopics(token: string, sessionId: string) {
-        return this.request<{
-            topics: Array<{
-                name: string;
-                mastery?: {
-                    score: number;
-                    updated_at?: string;
-                };
-            }>;
-        }>(`/feynman/sessions/${sessionId}/topics`, { token });
-    }
-
-    async evaluateFeynmanMastery(token: string, sessionId: string, topic: string, transcript: Array<{ role: string; content: string }>) {
-        return this.request<{
-            score: number;
-            feedback: string;
-        }>(`/feynman/sessions/${sessionId}/evaluate`, {
-            method: "POST",
-            token,
-            body: { topic, transcript },
-        });
-    }
 }
 
 export const api = new ApiClient(API_BASE_URL);

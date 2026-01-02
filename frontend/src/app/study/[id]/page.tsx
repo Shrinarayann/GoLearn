@@ -6,8 +6,6 @@ import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import PomodoroTimer from "@/components/PomodoroTimer";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 interface SessionData {
     session_id: string;
@@ -59,29 +57,6 @@ interface ApplicationResult {
 }
 
 type TabType = "exploration" | "engagement" | "application";
-
-const MarkdownContent = ({ content, className = "" }: { content: string | undefined, className?: string }) => {
-    if (!content) return null;
-    return (
-        <div className={className}>
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0 leading-relaxed" {...props} />,
-                    strong: ({ node, ...props }) => <strong className="font-bold underline underline-offset-2 decoration-[#4C9AFF]/30" {...props} />,
-                    code: ({ node, ...props }) => (
-                        <code className="px-1 py-0.5 rounded text-xs font-mono bg-[#F4F5F7] text-[#0052CC]" {...props} />
-                    ),
-                    ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
-                    ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2" {...props} />,
-                    li: ({ node, ...props }) => <li className="mb-1" {...props} />,
-                }}
-            >
-                {content}
-            </ReactMarkdown>
-        </div>
-    );
-};
 
 export default function StudySessionPage() {
     const { user, token, loading } = useAuth();
@@ -225,17 +200,6 @@ export default function StudySessionPage() {
                                 <Link
                                     href={`/quiz/${sessionId}`}
                                     className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
-                        {hasResults && activeTab === "application" && (
-                            <div className="flex items-center gap-2">
-                                <Link
-                                    href={`/study/${sessionId}/feynman`}
-                                    className="px-4 py-2 bg-[#EAE6FF] text-[#403294] rounded font-medium hover:bg-[#DED9FF] transition-colors text-sm text-center"
-                                >
-                                    Learn with Feynman
-                                </Link>
-                                <Link
-                                    href={`/quiz/${sessionId}`}
-                                    className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center"
                                 >
                                     Start Quiz
                                 </Link>
@@ -421,26 +385,32 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
 
     return (
         <div className="space-y-6">
+            {/* Summary */}
             {data.summary && (
                 <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-5">
                     <h3 className="text-xs sm:text-sm font-semibold text-[#0747A6] mb-2 uppercase tracking-wide">Summary</h3>
-                    <MarkdownContent content={data.summary} className="text-[#172B4D] italic" />
+                    <p className="text-[#172B4D] text-sm sm:text-base whitespace-pre-wrap">{renderValue(data.summary)}</p>
                 </div>
             )}
 
+            {/* Structure */}
             {data.structural_overview && (
                 <div>
-                    <h3 className="text-sm font-semibold text-[#6B778C] mb-2 uppercase tracking-wider">Structural Overview</h3>
-                    <MarkdownContent content={data.structural_overview} className="text-[#172B4D]" />
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Document Structure</h3>
+                    <p className="text-[#172B4D] leading-relaxed text-sm sm:text-base">{data.structural_overview}</p>
                 </div>
             )}
 
+            {/* Key Topics */}
             {data.key_topics && data.key_topics.length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Key Topics</h3>
                     <div className="flex flex-wrap gap-2">
                         {data.key_topics.map((topic, i) => (
-                            <span key={i} className="px-3 py-1.5 bg-[#F4F5F7] text-[#172B4D] rounded-full text-xs sm:text-sm font-medium">
+                            <span
+                                key={i}
+                                className="px-3 py-1.5 bg-[#F4F5F7] text-[#172B4D] rounded-full text-xs sm:text-sm font-medium"
+                            >
                                 {topic}
                             </span>
                         ))}
@@ -448,6 +418,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
                 </div>
             )}
 
+            {/* Visual Elements */}
             {data.visual_elements && data.visual_elements.length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Visual Elements</h3>
@@ -477,6 +448,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
             if ('explanation' in value) return String(value.explanation);
             if ('formula' in value) return String(value.formula);
             if ('text' in value) return String(value.text);
+            if ('content' in value) return String(value.content);
             return JSON.stringify(value, null, 2);
         }
         return String(value);
@@ -499,22 +471,26 @@ function EngagementTab({ data }: { data: EngagementResult }) {
         'summary', 'detailed_analysis', 'concept_explanations', 'diagram_interpretations',
         'definitions', 'formulas', 'examples', 'relationships', 'misconceptions', 'key_insights'
     ]);
+
+    // Find any additional fields the agent returned
     const additionalFields = Object.entries(data).filter(([key]) => !standardFields.has(key));
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
+            {/* Summary */}
             {data.summary && (
                 <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-5">
                     <h3 className="text-xs sm:text-sm font-semibold text-[#0747A6] mb-2 uppercase tracking-wide">Engagement Summary</h3>
-                    <MarkdownContent content={data.summary} className="text-[#172B4D] sm:text-base" />
+                    <p className="text-[#172B4D] text-sm sm:text-base leading-relaxed whitespace-pre-wrap">{renderValue(data.summary)}</p>
                 </div>
             )}
 
+            {/* Detailed Analysis */}
             {data.detailed_analysis && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Detailed Analysis</h3>
                     <div className="bg-[#F4F5F7] rounded-lg p-4 sm:p-5">
-                        <MarkdownContent content={data.detailed_analysis} className="text-[#172B4D]" />
+                        <p className="text-[#172B4D] text-sm leading-relaxed whitespace-pre-wrap">{renderValue(data.detailed_analysis)}</p>
                     </div>
                 </div>
             )}
@@ -561,25 +537,11 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                                 </div>
                             ))
                         )}
-            {data.diagram_interpretations && Object.keys(data.diagram_interpretations).length > 0 && (
-                <div>
-                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Visual Elements & Diagrams</h3>
-                    <div className="space-y-4">
-                        {Object.entries(data.diagram_interpretations).map(([name, interpretation], i) => (
-                            <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
-                                <h4 className="font-semibold text-[#172B4D] mb-2 text-sm sm:text-base flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                    {name}
-                                </h4>
-                                <MarkdownContent content={renderValue(interpretation)} className="text-[#172B4D] text-xs sm:text-sm" />
-                            </div>
-                        ))}
                     </div>
                 </div>
             )}
 
+            {/* Concept Explanations */}
             {data.concept_explanations && Object.keys(data.concept_explanations).length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Concept Explanations</h3>
@@ -587,13 +549,14 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                         {Object.entries(data.concept_explanations).map(([concept, explanation], i) => (
                             <div key={i} className="border-l-4 border-[#0052CC] pl-4 py-2">
                                 <h4 className="font-semibold text-[#172B4D] mb-1 text-sm sm:text-base">{concept}</h4>
-                                <MarkdownContent content={renderValue(explanation)} className="text-[#42526E] text-xs sm:text-sm" />
+                                <p className="text-[#42526E] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{renderValue(explanation)}</p>
                             </div>
                         ))}
                     </div>
                 </div>
             )}
 
+            {/* Definitions */}
             {data.definitions && Object.keys(data.definitions).length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Definitions</h3>
@@ -601,15 +564,14 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                         {Object.entries(data.definitions).map(([term, definition], i) => (
                             <div key={i} className="px-3 sm:px-4 py-3 text-sm">
                                 <span className="font-semibold text-[#172B4D]">{term}:</span>
-                                <div className="inline ml-2 text-[#42526E]">
-                                    <MarkdownContent content={renderValue(definition)} className="inline" />
-                                </div>
+                                <span className="text-[#42526E] ml-2">{renderValue(definition)}</span>
                             </div>
                         ))}
                     </div>
                 </div>
             )}
 
+            {/* Formulas */}
             {data.formulas && Object.keys(data.formulas).length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Formulas & Equations</h3>
@@ -626,53 +588,68 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                 </div>
             )}
 
-            {/* Other list fields */}
-            {[
-                { title: 'Concept Relationships', items: data.relationships, bg: 'bg-[#EAE6FF]', icon: 'M13 10V3L4 14h7v7l9-11h-7z', iconColor: 'text-[#6554C0]' },
-                { title: 'Examples', items: data.examples, bg: 'bg-[#E3FCEF]', bullet: '→', bulletColor: 'text-[#36B37E]' },
-                { title: 'Common Misconceptions', items: data.misconceptions, bg: 'bg-[#FFEBE6]', border: 'border-l-4 border-[#DE350B]', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', iconColor: 'text-[#DE350B]' },
-                { title: 'Key Insights', items: data.key_insights, bg: 'bg-[#FFFAE6]', icon: 'M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z', iconColor: 'text-[#FFAB00]', isSvgFull: true }
-            ].map((field, idx) => field.items && field.items.length > 0 && (
-                <div key={idx}>
-                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">{field.title}</h3>
-                    <div className="space-y-3">
-                        {field.items.map((item: any, i: number) => (
-                            <div key={i} className={`flex items-start gap-3 p-3 sm:p-4 rounded-lg ${field.bg} ${field.border || ''}`}>
-                                {field.icon && (
-                                    <svg className={`w-4 h-4 flex-shrink-0 mt-0.5 ${field.iconColor}`} fill={field.isSvgFull ? "currentColor" : "none"} stroke={field.isSvgFull ? "none" : "currentColor"} viewBox={field.isSvgFull ? "0 0 20 20" : "0 0 24 24"}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={field.icon} clipRule="evenodd" fillRule="evenodd" />
-                                    </svg>
-                                )}
-                                {field.bullet && <span className={`${field.bulletColor} font-bold flex-shrink-0`}>{field.bullet}</span>}
-                                <MarkdownContent content={renderValue(item)} className="text-[#172B4D] text-xs sm:text-sm" />
+            {/* Relationships */}
+            {data.relationships && data.relationships.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Concept Relationships</h3>
+                    <div className="space-y-2">
+                        {data.relationships.map((relationship, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#EAE6FF] rounded-lg p-3 sm:p-4">
+                                <svg className="w-4 h-4 text-[#6554C0] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{renderValue(relationship)}</p>
                             </div>
                         ))}
                     </div>
                 </div>
-            ))}
+            )}
 
-            {/* Dynamic Fields */}
-            {additionalFields.length > 0 && additionalFields.map(([key, value]) => value && (
-                <div key={key}>
-                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">{key.replace(/_/g, ' ')}</h3>
-                    {typeof value === 'string' ? (
-                        <div className="bg-[#F4F5F7] rounded-lg p-4">
-                            <MarkdownContent content={value} className="text-[#172B4D] text-sm" />
-                        </div>
-                    ) : Array.isArray(value) ? (
-                        <div className="space-y-2">
-                            {value.map((item, i) => (
-                                <div key={i} className="flex items-start gap-2 bg-[#F4F5F7] rounded p-3 text-sm text-[#172B4D]">
-                                    <span className="text-[#6B778C]">•</span>
-                                    <MarkdownContent content={renderValue(item)} />
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="bg-[#F4F5F7] rounded-lg p-3 text-sm text-[#42526E]">
-                            <MarkdownContent content={JSON.stringify(value, null, 2)} />
-                        </div>
-                    )}
+            {/* Examples */}
+            {data.examples && data.examples.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Examples</h3>
+                    <div className="space-y-3">
+                        {data.examples.map((example, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#E3FCEF] rounded-lg p-3 sm:p-4">
+                                <span className="text-[#36B37E] font-bold flex-shrink-0">→</span>
+                                <p className="text-[#172B4D] text-xs sm:text-sm whitespace-pre-wrap">{renderValue(example)}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {/* Misconceptions */}
+            {data.misconceptions && data.misconceptions.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Common Misconceptions</h3>
+                    <div className="space-y-3">
+                        {data.misconceptions.map((misconception, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#FFEBE6] rounded-lg p-3 sm:p-4 border-l-4 border-[#DE350B]">
+                                <svg className="w-4 h-4 text-[#DE350B] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{renderValue(misconception)}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Key Insights */}
+            {data.key_insights && data.key_insights.length > 0 && (
+                <div>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Key Insights</h3>
+                    <div className="grid gap-3">
+                        {data.key_insights.map((insight, i) => (
+                            <div key={i} className="flex items-start gap-3 bg-[#FFFAE6] rounded-lg p-3 sm:p-4">
+                                <svg className="w-4 h-4 text-[#FFAB00] flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <p className="text-[#172B4D] text-xs sm:text-sm">{renderValue(insight)}</p>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -713,7 +690,6 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                     </div>
                 );
             })}
-            ))}
         </div>
     );
 }
@@ -724,6 +700,13 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
     // Helper to safely render any value
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
+        if (typeof value === 'number') return String(value);
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') {
+            if ('explanation' in value) return String(value.explanation);
+            if ('text' in value) return String(value.text);
+            return JSON.stringify(value, null, 2);
+        }
         return String(value);
     };
 
@@ -740,7 +723,8 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
     }
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
+            {/* Practical Applications */}
             {data.practical_applications && data.practical_applications.length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Practical Applications</h3>
@@ -750,49 +734,53 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
                                 <span className="w-5 h-5 sm:w-6 sm:h-6 bg-[#0052CC] text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
                                     {i + 1}
                                 </span>
-                                <MarkdownContent content={renderValue(app)} className="text-[#172B4D] text-xs sm:text-sm" />
+                                <p className="text-[#172B4D] text-xs sm:text-sm whitespace-pre-wrap">{renderValue(app)}</p>
                             </div>
                         ))}
                     </div>
                 </div>
             )}
 
+            {/* Connections */}
             {data.connections && data.connections.length > 0 && (
                 <div>
-                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Connections</h3>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Connections to Other Topics</h3>
                     <div className="flex flex-wrap gap-2">
                         {data.connections.map((conn, i) => (
                             <span key={i} className="px-3 py-2 bg-[#EAE6FF] text-[#403294] rounded text-xs sm:text-sm">
-                                <MarkdownContent content={renderValue(conn)} className="inline" />
+                                {renderValue(conn)}
                             </span>
                         ))}
                     </div>
                 </div>
             )}
 
+            {/* Critical Analysis */}
             {data.critical_analysis && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Critical Analysis</h3>
                     <div className="bg-[#F4F5F7] rounded-lg p-4 sm:p-5">
-                        <MarkdownContent content={data.critical_analysis} className="text-[#172B4D] text-sm" />
+                        <p className="text-[#172B4D] leading-relaxed text-sm whitespace-pre-wrap">{renderValue(data.critical_analysis)}</p>
                     </div>
                 </div>
             )}
 
+            {/* Study Focus */}
             {data.study_focus && data.study_focus.length > 0 && (
                 <div>
-                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Study Focus</h3>
+                    <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Areas to Focus On</h3>
                     <ul className="space-y-2">
                         {data.study_focus.map((focus, i) => (
                             <li key={i} className="flex items-center gap-3 text-[#172B4D] text-sm">
-                                <span className="w-2 h-2 bg-[#FF5630] rounded-full flex-shrink-0" />
-                                <MarkdownContent content={renderValue(focus)} />
+                                <span className="w-2 h-2 bg-[#FF5630] rounded-full flex-shrink-0"></span>
+                                {renderValue(focus)}
                             </li>
                         ))}
                     </ul>
                 </div>
             )}
 
+            {/* Mental Models */}
             {data.mental_models && data.mental_models.length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Memory Aids</h3>
@@ -802,7 +790,7 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
                                 <svg className="w-4 h-4 text-[#6B778C] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                                 </svg>
-                                <MarkdownContent content={renderValue(model)} className="text-[#172B4D] text-xs sm:text-sm" />
+                                <p className="text-[#172B4D] text-xs sm:text-sm whitespace-pre-wrap">{renderValue(model)}</p>
                             </div>
                         ))}
                     </div>
@@ -810,18 +798,16 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
             )}
 
             {/* Start Quiz CTA */}
-            <div className="mt-8 pt-8 border-t border-[#DFE1E6]">
-                <div className="bg-[#DEEBFF] rounded-lg p-6 text-center">
-                    <h3 className="text-lg font-semibold text-[#0747A6] mb-2">Ready to test your knowledge?</h3>
-                    <p className="text-[#42526E] mb-4 text-sm">Take a quiz based on the material you just studied.</p>
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                        <Link href={`/study/${sessionId}/feynman`} className="px-6 py-3 bg-white text-[#403294] border border-[#403294] rounded font-medium hover:bg-[#F4F5F7] transition-colors text-sm min-w-[160px]">
-                            Learn with Feynman
-                        </Link>
-                        <Link href={`/quiz/${sessionId}`} className="px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm min-w-[160px]">
-                            Start Quiz
-                        </Link>
-                    </div>
+            <div className="mt-6 sm:mt-8 pt-6 border-t border-[#DFE1E6]">
+                <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-6 text-center">
+                    <h3 className="text-base sm:text-lg font-semibold text-[#0747A6] mb-2">Ready to test your knowledge?</h3>
+                    <p className="text-[#42526E] mb-4 text-xs sm:text-sm">Take a quiz based on the material you just studied.</p>
+                    <Link
+                        href={`/quiz/${sessionId}`}
+                        className="inline-block px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm"
+                    >
+                        Start Quiz
+                    </Link>
                 </div>
             </div>
         </div>

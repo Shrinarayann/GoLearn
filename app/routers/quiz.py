@@ -112,10 +112,7 @@ async def generate_quiz(
     
     # If already quizzing, return existing questions
     if session["status"] == "quizzing":
-        existing_questions = await db.get_session_questions(
-            session_id, 
-            fields=["question", "question_type", "difficulty", "concept", "leitner_box"]
-        )
+        existing_questions = await db.get_session_questions(session_id)
         if existing_questions:
             return [
                 QuestionResponse(
@@ -221,11 +218,7 @@ async def get_questions(
             detail="Session not found"
         )
     
-    questions = await db.get_session_questions(
-        session_id, 
-        due_only=due_only,
-        fields=["question", "question_type", "difficulty", "concept", "leitner_box", "next_review_at"]
-    )
+    questions = await db.get_session_questions(session_id, due_only=due_only)
     
     if due_only:
         # 1. Find due concepts
@@ -489,11 +482,8 @@ async def get_global_due_questions(
     """
     user_id = current_user["user_id"]
     
-    # Get all questions for the user (only metadata needed for list)
-    all_questions = await db.get_user_questions(
-        user_id,
-        fields=["question", "question_type", "difficulty", "concept", "leitner_box", "session_id", "next_review_at"]
-    )
+    # Get all questions for the user
+    all_questions = await db.get_user_questions(user_id)
     
     # Filter for due questions and add timing info
     now = datetime.utcnow() + timedelta(seconds=5)
@@ -553,7 +543,7 @@ async def get_global_progress(
     user_id = current_user["user_id"]
     
     # Get all user sessions
-    sessions = await db.get_user_sessions(user_id, fields=["session_id", "title"])
+    sessions = await db.get_user_sessions(user_id)
     
     if not sessions:
         return GlobalProgressResponse(
@@ -564,7 +554,7 @@ async def get_global_progress(
         )
     
     # Get all questions for the user
-    all_questions = await db.get_user_questions(user_id, fields=["session_id", "leitner_box", "next_review_at"])
+    all_questions = await db.get_user_questions(user_id)
     
     # Calculate global stats
     total_concepts = len(all_questions)
