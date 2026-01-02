@@ -57,6 +57,8 @@ _comprehension_runner = Runner(
     session_service=_session_service
 )
 
+llm = genai.GenerativeModel("gemini-1.5-flash")
+
 # Create the ADK Runner for Feynman
 _feynman_runner = Runner(
     agent=feynman_agent,

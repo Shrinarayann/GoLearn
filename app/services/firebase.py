@@ -292,3 +292,20 @@ class FirestoreService:
         """Update SRS tracking for a concept."""
         self.db.collection("quiz_concepts").document(concept_id).update(data)
 
+
+    # Feynman Masteries ---
+
+    async def update_feynman_mastery(self, session_id: str, topic: str, score: int) -> None:
+        """Update the mastery score for a specific topic in a Feynman session."""
+        session_ref = self.db.collection("study_sessions").document(session_id)
+        
+        # Use a nested field update to avoid overwriting other topics
+        # Structure: feynman_mastery: { topic: { score: int, updated_at: datetime } }
+        update_path = f"feynman_mastery.{topic}"
+        session_ref.update({
+            update_path: {
+                "score": score,
+                "updated_at": datetime.utcnow()
+            }
+        })
+
