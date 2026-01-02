@@ -19,6 +19,12 @@ interface SessionProgress {
     mastery_percentage: number;
 }
 
+interface GlobalProgress {
+    total_due: number;
+    total_concepts: number;
+    overall_mastery_percentage: number;
+}
+
 export default function DashboardPage() {
     const { user, token, loading, signOut } = useAuth();
     const router = useRouter();
@@ -28,6 +34,7 @@ export default function DashboardPage() {
     const [creating, setCreating] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [progressData, setProgressData] = useState<Record<string, SessionProgress>>({});
+    const [globalProgress, setGlobalProgress] = useState<GlobalProgress | null>(null);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -35,44 +42,40 @@ export default function DashboardPage() {
         }
     }, [user, loading, router]);
 
-    const loadSessions = useCallback(async () => {
+    const loadDashboardData = useCallback(async () => {
         if (!token) return;
         try {
-            const data = await api.getSessions(token);
-            setSessions(data);
-            // Load progress for quizzing sessions
-            await loadProgress(data);
+            // Single optimized API call for all dashboard data
+            const data = await api.getDashboardData(token);
+
+            // Set sessions
+            setSessions(data.sessions);
+
+            // Set global progress
+            setGlobalProgress(data.global_progress);
+
+            // Build progress map from sessions_progress
+            const progressMap: Record<string, SessionProgress> = {};
+            data.sessions_progress.forEach((session: { session_id: string; due_count: number; total: number; mastery_percentage: number; }) => {
+                progressMap[session.session_id] = {
+                    due_for_review: session.due_count,
+                    total_concepts: session.total,
+                    mastery_percentage: session.mastery_percentage,
+                };
+            });
+            setProgressData(progressMap);
         } catch (error) {
-            console.error("Failed to load sessions:", error);
+            console.error("Failed to load dashboard data:", error);
         } finally {
             setLoadingSessions(false);
         }
     }, [token]);
 
-    const loadProgress = async (sessionList: Session[]) => {
-        if (!token) return;
-        const quizzingSessions = sessionList.filter(s => s.status === "quizzing");
-        const progressMap: Record<string, SessionProgress> = {};
-
-        await Promise.all(
-            quizzingSessions.map(async (session) => {
-                try {
-                    const progress = await api.getProgress(token, session.session_id);
-                    progressMap[session.session_id] = progress;
-                } catch (error) {
-                    console.error(`Failed to load progress for ${session.session_id}:`, error);
-                }
-            })
-        );
-
-        setProgressData(progressMap);
-    };
-
     useEffect(() => {
         if (token) {
-            loadSessions();
+            loadDashboardData();
         }
-    }, [token, loadSessions]);
+    }, [token, loadDashboardData]);
 
     const createSession = async () => {
         if (!token || !newTitle.trim()) return;
@@ -162,6 +165,48 @@ export default function DashboardPage() {
                     </h2>
                     <p className="text-[#6B778C] text-sm sm:text-base">Your study sessions and progress</p>
                 </div>
+
+                {/* Global Review Center */}
+                {globalProgress && globalProgress.total_due > 0 && (
+                    <div className="mb-6 sm:mb-8">
+                        <div className="bg-gradient-to-r from-[#0052CC] to-[#6554C0] rounded-lg shadow-lg p-6 sm:p-8 text-white">
+                            <div className="flex items-start justify-between gap-4 mb-4">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <h3 className="text-lg sm:text-xl font-semibold">Global Review</h3>
+                                    </div>
+                                    <p className="text-white/90 text-sm sm:text-base">Review questions from all your sessions</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+                                <div>
+                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.total_due}</div>
+                                    <div className="text-white/80 text-xs sm:text-sm">Cards Due</div>
+                                </div>
+                                <div>
+                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.total_concepts}</div>
+                                    <div className="text-white/80 text-xs sm:text-sm">Total Cards</div>
+                                </div>
+                                <div className="col-span-2 sm:col-span-1">
+                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.overall_mastery_percentage}%</div>
+                                    <div className="text-white/80 text-xs sm:text-sm">Mastery</div>
+                                </div>
+                            </div>
+                            <Link
+                                href="/quiz/global?mode=global"
+                                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white text-[#0052CC] rounded-lg font-semibold hover:bg-white/90 transition-colors w-full sm:w-auto"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                Start Global Review
+                            </Link>
+                        </div>
+                    </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 mb-4 sm:mb-6">

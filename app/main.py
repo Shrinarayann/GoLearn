@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import auth, study, quiz
+from .routers import auth, study, quiz, dashboard
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(study.router, prefix="/study", tags=["Study Sessions"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz & Retention"])
+app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 
 
 @app.get("/")
