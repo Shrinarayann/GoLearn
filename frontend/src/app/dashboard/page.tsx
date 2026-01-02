@@ -11,6 +11,7 @@ interface Session {
     title: string;
     status: string;
     created_at: string;
+    enable_spaced_repetition?: boolean;
 }
 
 interface SessionProgress {
@@ -31,6 +32,7 @@ export default function DashboardPage() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [loadingSessions, setLoadingSessions] = useState(true);
     const [newTitle, setNewTitle] = useState("");
+    const [enableSpacedRepetition, setEnableSpacedRepetition] = useState(true);
     const [creating, setCreating] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [progressData, setProgressData] = useState<Record<string, SessionProgress>>({});
@@ -82,9 +84,10 @@ export default function DashboardPage() {
 
         setCreating(true);
         try {
-            const session = await api.createSession(token, newTitle.trim());
+            const session = await api.createSession(token, newTitle.trim(), undefined, enableSpacedRepetition);
             setShowModal(false);
             setNewTitle("");
+            setEnableSpacedRepetition(true); // Reset to default
             router.push(`/study/${session.session_id}`);
         } catch (error) {
             console.error("Failed to create session:", error);
@@ -260,8 +263,20 @@ export default function DashboardPage() {
                                             className="block hover:opacity-80 transition-opacity"
                                         >
                                             <div className="flex items-start justify-between gap-3 mb-2">
-                                                <h4 className="font-medium text-[#172B4D]">{session.title}</h4>
-                                                {getStatusBadge(session.status)}
+                                                <div className="flex-1">
+                                                    <h4 className="font-medium text-[#172B4D] mb-1">{session.title}</h4>
+                                                    <div className="flex items-center gap-2">
+                                                        {getStatusBadge(session.status)}
+                                                        {session.enable_spaced_repetition === false && (
+                                                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#F4F5F7] text-[#6B778C] flex items-center gap-1">
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                                </svg>
+                                                                No SR
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
                                             <p className="text-xs text-[#6B778C]">{formatDate(session.created_at)}</p>
                                         </Link>
@@ -317,11 +332,21 @@ export default function DashboardPage() {
                                                     >
                                                         {session.title}
                                                     </Link>
-                                                    {hasDue && (
-                                                        <div className="text-xs text-[#FF8B00] mt-1">
-                                                            {progress.due_for_review} due for review
-                                                        </div>
-                                                    )}
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        {hasDue && (
+                                                            <div className="text-xs text-[#FF8B00]">
+                                                                {progress.due_for_review} due for review
+                                                            </div>
+                                                        )}
+                                                        {session.enable_spaced_repetition === false && (
+                                                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-[#F4F5F7] text-[#6B778C] flex items-center gap-1">
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                                </svg>
+                                                                No Spaced Repetition
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-4">
                                                     {getStatusBadge(session.status)}
@@ -364,25 +389,41 @@ export default function DashboardPage() {
                         <div className="border-b border-[#DFE1E6] px-4 sm:px-6 py-4">
                             <h3 className="text-lg font-semibold text-[#172B4D]">Create New Session</h3>
                         </div>
-                        <div className="p-4 sm:p-6">
-                            <label className="block text-sm font-medium text-[#172B4D] mb-2">
-                                Session Title
-                            </label>
-                            <input
-                                type="text"
-                                value={newTitle}
-                                onChange={(e) => setNewTitle(e.target.value)}
-                                placeholder="e.g., Machine Learning Basics"
-                                className="w-full px-4 py-2.5 border border-[#DFE1E6] rounded focus:ring-2 focus:ring-[#4C9AFF] focus:border-transparent text-[#172B4D] placeholder-[#6B778C]"
-                                autoFocus
-                                onKeyDown={(e) => e.key === "Enter" && createSession()}
-                            />
+                        <div className="p-4 sm:p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-[#172B4D] mb-2">
+                                    Session Title
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newTitle}
+                                    onChange={(e) => setNewTitle(e.target.value)}
+                                    placeholder="e.g., Machine Learning Basics"
+                                    className="w-full px-4 py-2.5 border border-[#DFE1E6] rounded focus:ring-2 focus:ring-[#4C9AFF] focus:border-transparent text-[#172B4D] placeholder-[#6B778C]"
+                                    autoFocus
+                                    onKeyDown={(e) => e.key === "Enter" && createSession()}
+                                />
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <input
+                                    type="checkbox"
+                                    id="enableSpacedRepetition"
+                                    checked={enableSpacedRepetition}
+                                    onChange={(e) => setEnableSpacedRepetition(e.target.checked)}
+                                    className="mt-0.5 w-4 h-4 text-[#0052CC] border-[#DFE1E6] rounded focus:ring-2 focus:ring-[#4C9AFF]"
+                                />
+                                <label htmlFor="enableSpacedRepetition" className="text-sm text-[#172B4D] cursor-pointer">
+                                    <div className="font-medium">Enable spaced repetition</div>
+                                    <div className="text-xs text-[#6B778C] mt-0.5">Generate quiz questions and track review progress for this session</div>
+                                </label>
+                            </div>
                         </div>
                         <div className="border-t border-[#DFE1E6] px-4 sm:px-6 py-4 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3">
                             <button
                                 onClick={() => {
                                     setShowModal(false);
                                     setNewTitle("");
+                                    setEnableSpacedRepetition(true); // Reset to default
                                 }}
                                 className="w-full sm:w-auto px-4 py-2 text-sm font-medium text-[#6B778C] hover:text-[#172B4D] transition-colors"
                             >

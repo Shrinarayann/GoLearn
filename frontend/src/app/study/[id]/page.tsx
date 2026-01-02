@@ -13,6 +13,7 @@ interface SessionData {
     session_id: string;
     title: string;
     status: string;
+    enable_spaced_repetition?: boolean;  // New field
     pdf_filename?: string;
     exploration_result?: ExplorationResult;
     engagement_result?: EngagementResult;
@@ -205,12 +206,14 @@ export default function StudySessionPage() {
                         {hasResults && (
                             <div className="flex items-center gap-3">
                                 <PomodoroTimer autoStart={true} />
-                                <Link
-                                    href={`/quiz/${sessionId}`}
-                                    className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
-                                >
-                                    Start Quiz
-                                </Link>
+                                {session?.enable_spaced_repetition !== false && (
+                                    <Link
+                                        href={`/quiz/${sessionId}`}
+                                        className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
+                                    >
+                                        Start Quiz
+                                    </Link>
+                                )}
 
                                 {/* Exam button with dynamic states */}
                                 {examStatus.status === "generating" ? (
