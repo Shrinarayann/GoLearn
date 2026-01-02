@@ -22,21 +22,23 @@ class ExamPDF(FPDF):
         self.set_auto_page_break(auto=True, margin=25)
     
     def header(self):
-        """Add header to each page."""
-        # GoLearn branding
+        """Add header to each page. Full header only on first page."""
+        # GoLearn branding (all pages)
         self.set_font('Helvetica', 'B', 16)
         self.set_text_color(0, 82, 204)  # #0052CC
         self.cell(0, 10, 'GoLearn Examination', align='C', new_x='LMARGIN', new_y='NEXT')
         
-        # Session title
-        self.set_font('Helvetica', '', 12)
-        self.set_text_color(23, 43, 77)  # #172B4D
-        self.cell(0, 8, self.session_title, align='C', new_x='LMARGIN', new_y='NEXT')
-        
-        # Date
-        self.set_font('Helvetica', 'I', 10)
-        self.set_text_color(107, 119, 140)  # #6B778C
-        self.cell(0, 6, f"Generated: {datetime.now().strftime('%B %d, %Y')}", align='C', new_x='LMARGIN', new_y='NEXT')
+        # Session title and date only on first page
+        if self.page_no() == 1:
+            # Session title
+            self.set_font('Helvetica', '', 12)
+            self.set_text_color(23, 43, 77)  # #172B4D
+            self.cell(0, 8, self.session_title, align='C', new_x='LMARGIN', new_y='NEXT')
+            
+            # Date
+            self.set_font('Helvetica', 'I', 10)
+            self.set_text_color(107, 119, 140)  # #6B778C
+            self.cell(0, 6, f"Generated: {datetime.now().strftime('%B %d, %Y')}", align='C', new_x='LMARGIN', new_y='NEXT')
         
         # Divider line
         self.set_draw_color(223, 225, 230)  # #DFE1E6

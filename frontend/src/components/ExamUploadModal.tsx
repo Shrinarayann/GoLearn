@@ -47,17 +47,15 @@ export default function ExamUploadModal({
             return;
         }
 
-        setUploading(true);
+        // Close modal immediately - don't wait for generation
+        setFile(null);
         setError("");
+        onClose();
 
-        try {
-            await startExamGeneration(sessionId, file);
-            // Close modal immediately - generation continues in background
-            onClose();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to start generation");
-            setUploading(false);
-        }
+        // Start generation in background (fire-and-forget)
+        startExamGeneration(sessionId, file).catch((err) => {
+            console.error("Exam generation failed:", err);
+        });
     };
 
     const handleClose = () => {
@@ -127,8 +125,8 @@ export default function ExamUploadModal({
                             onDrop={handleDrop}
                             onClick={() => fileInputRef.current?.click()}
                             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${file
-                                    ? "border-[#36B37E] bg-[#E3FCEF]"
-                                    : "border-[#DFE1E6] hover:border-[#4C9AFF] hover:bg-[#F4F5F7]"
+                                ? "border-[#36B37E] bg-[#E3FCEF]"
+                                : "border-[#DFE1E6] hover:border-[#4C9AFF] hover:bg-[#F4F5F7]"
                                 }`}
                         >
                             <input
