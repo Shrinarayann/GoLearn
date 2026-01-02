@@ -12,6 +12,7 @@ from ..dependencies import get_current_user
 from ..services.firebase import FirestoreService
 from ..services.storage_service import upload_file_to_storage
 from ..services.agent_service import run_comprehension
+from ..services.pdf_image_service import extract_images_from_pdf_bytes_as_base64
 
 router = APIRouter()
 db = FirestoreService()
@@ -236,3 +237,73 @@ async def run_comprehension_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Comprehension failed: {str(e)}"
         )
+
+
+@router.post("/sessions/{session_id}/extract-images")
+async def extract_pdf_images(
+    session_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    min_width: int = 100,
+    min_height: int = 100,
+    max_width: int = 800,
+    max_height: int = 800,
+    quality: int = 85
+):
+    """
+    Extract images from an uploaded PDF and return them as base64-encoded data URLs.
+    Images are automatically resized to medium size for efficiency.
+    Does NOT save images to disk or storage.
+    
+    Parameters:
+    - file: PDF file to extract images from
+    - min_width/min_height: Minimum dimensions to filter tiny icons (default 100px)
+    - max_width/max_height: Maximum dimensions for optimization (default 800px)
+    - quality: JPEG compression quality 1-100 (default 85)
+    
+    Returns:
+    - JSON with total count and array of base64-encoded images with metadata
+    """
+    # Verify session ownership
+    session = await db.get_session(session_id)
+    if not session or session["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    # Validate file type
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF files are supported"
+        )
+    
+    try:
+        # Read PDF file bytes
+        pdf_bytes = await file.read()
+        
+        # Extract images as base64
+        result = extract_images_from_pdf_bytes_as_base64(
+            pdf_bytes=pdf_bytes,
+            min_width=min_width,
+            min_height=min_height,
+            max_width=max_width,
+            max_height=max_height,
+            quality=quality,
+            deduplicate=True
+        )
+        
+        return {
+            "session_id": session_id,
+            "filename": file.filename,
+            "total_images": result["total_images"],
+            "images": result["images"]
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Image extraction failed: {str(e)}"
+        )
+
