@@ -80,6 +80,12 @@ async def get_dashboard_data(
             sessions_progress=[]
         )
     
+    # Build map of SR-enabled session IDs
+    sr_enabled_sessions = {
+        s["session_id"] for s in sessions 
+        if s.get("enable_spaced_repetition", True)
+    }
+    
     # Get all questions for the user (pass sessions to avoid duplicate query)
     session_map = {s["session_id"]: s.get("title", "Untitled") for s in sessions}
     session_ids = list(session_map.keys())
@@ -132,27 +138,32 @@ async def get_dashboard_data(
             if session_id in session_stats:
                 session_stats[session_id]["mastered"] += 1
         
-        # Check if due
-        review_date = q.get("next_review_at")
-        is_due = False
-        
-        if review_date is None:
-            is_due = True
-        elif isinstance(review_date, datetime):
-            review_naive = review_date.replace(tzinfo=None) if review_date.tzinfo else review_date
-            is_due = review_naive <= now
-        elif isinstance(review_date, str):
-            try:
-                dt = datetime.fromisoformat(review_date.replace('Z', '+00:00'))
-                dt_naive = dt.replace(tzinfo=None)
-                is_due = dt_naive <= now
-            except:
+        # Check if due (only for SR-enabled sessions)
+        # For SR-disabled sessions, next_review_at is None but should not count as due
+        if session_id not in sr_enabled_sessions:
+            # Skip due calculation for SR-disabled sessions
+            pass
+        else:
+            review_date = q.get("next_review_at")
+            is_due = False
+            
+            if review_date is None:
                 is_due = True
-        
-        if is_due:
-            total_due += 1
-            if session_id in session_stats:
-                session_stats[session_id]["due_count"] += 1
+            elif isinstance(review_date, datetime):
+                review_naive = review_date.replace(tzinfo=None) if review_date.tzinfo else review_date
+                is_due = review_naive <= now
+            elif isinstance(review_date, str):
+                try:
+                    dt = datetime.fromisoformat(review_date.replace('Z', '+00:00'))
+                    dt_naive = dt.replace(tzinfo=None)
+                    is_due = dt_naive <= now
+                except:
+                    is_due = True
+            
+            if is_due:
+                total_due += 1
+                if session_id in session_stats:
+                    session_stats[session_id]["due_count"] += 1
     
     # Calculate overall mastery percentage
     overall_mastery = (total_mastered / total_concepts * 100) if total_concepts > 0 else 0

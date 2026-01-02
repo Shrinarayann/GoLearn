@@ -242,17 +242,17 @@ async def get_questions(
             detail="Session not found"
         )
     
-    questions = await db.get_session_questions(session_id, due_only=due_only)
+    questions = await db.get_session_questions(session_id, due_only=False)
     
     if due_only:
-        # 1. Find due concepts
-        all_concepts = await db.get_session_concepts(session_id)
+        # Filter for due questions (consistent with dashboard logic)
         now = datetime.utcnow() + timedelta(seconds=5)
         
-        due_concepts = []
-        for c in all_concepts:
-            review_at = c.get("next_review_at")
+        due_questions = []
+        for q in questions:
+            review_at = q.get("next_review_at")
             is_due = False
+            
             if review_at is None:
                 is_due = True
             elif isinstance(review_at, datetime):
@@ -265,52 +265,25 @@ async def get_questions(
                     is_due = True
             
             if is_due:
-                due_concepts.append(c)
+                due_questions.append(q)
         
-        if not due_concepts:
+        if not due_questions:
             return []
 
-        # 2. Generate fresh questions for due concepts
-        questions_resp = []
-        for concept in due_concepts:
-            # Generate new question for this concept
-            new_q = await generate_single_question(
-                concept=concept["concept_name"],
-                exploration=session.get("exploration_result", {}),
-                engagement=session.get("engagement_result", {}),
-                application=session.get("application_result", {})
+        # Return the due questions directly
+        return [
+            QuestionResponse(
+                question_id=q["question_id"],
+                question=q["question"],
+                question_type=q.get("question_type", "recall"),
+                difficulty=q.get("difficulty", "medium"),
+                concept=q.get("concept", "general"),
+                stability=q.get("stability"),
+                fsrs_difficulty=q.get("fsrs_difficulty"),
+                leitner_box=q.get("leitner_box", 1),
             )
-            
-            # Save new question to DB
-            q_data = {
-                "session_id": session_id,
-                "question": new_q["question"],
-                "correct_answer": new_q["correct_answer"],
-                "question_type": new_q.get("type", "recall"),
-                "difficulty": new_q.get("difficulty", "medium"),
-                "concept": concept["concept_name"],
-                "explanation": new_q.get("explanation", ""),
-                "leitner_box": 1,
-                "created_at": now,
-                "next_review_at": now,
-                "times_reviewed": 0,
-                "stability": concept["stability"],
-                "fsrs_difficulty": concept["difficulty"],
-                "is_review_instance": True
-            }
-            question_id = await db.create_question(q_data)
-            questions_resp.append(QuestionResponse(
-                question_id=question_id,
-                question=q_data["question"],
-                question_type=q_data["question_type"],
-                difficulty=q_data["difficulty"],
-                concept=q_data["concept"],
-                stability=q_data["stability"],
-                fsrs_difficulty=q_data["fsrs_difficulty"],
-                leitner_box=1
-            ))
-            
-        return questions_resp
+            for q in due_questions
+        ]
 
     return [
         QuestionResponse(
@@ -598,6 +571,12 @@ async def get_global_progress(
             sessions_breakdown=[]
         )
     
+    # Build map of SR-enabled session IDs
+    sr_enabled_session_ids = {
+        s["session_id"] for s in sessions 
+        if s.get("enable_spaced_repetition", True)
+    }
+    
     # Get all questions for the user
     all_questions = await db.get_user_questions(user_id)
     
@@ -633,7 +612,11 @@ async def get_global_progress(
             if session_id in session_stats:
                 session_stats[session_id]["mastered"] += 1
         
-        # Check if due
+        # Check if due (only for SR-enabled sessions)
+        if session_id not in sr_enabled_session_ids:
+            # Skip due calculation for SR-disabled sessions
+            continue
+            
         review_date = q.get("next_review_at")
         is_due = False
         
