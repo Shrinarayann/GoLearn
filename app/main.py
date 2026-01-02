@@ -15,10 +15,10 @@ from .routers import auth, study, quiz, dashboard, feynman
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
-    print("🚀 GoLearn API starting...")
+    print("GoLearn API starting...")
     yield
     # Shutdown
-    print("👋 GoLearn API shutting down...")
+    print("GoLearn API shutting down...")
 
 
 app = FastAPI(

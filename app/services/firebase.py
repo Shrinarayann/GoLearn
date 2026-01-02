@@ -207,3 +207,21 @@ class FirestoreService:
     async def update_question(self, question_id: str, data: dict) -> None:
         """Update a quiz question."""
         self.db.collection("quiz_questions").document(question_id).update(data)
+
+    async def update_session(self, session_id: str, data: dict) -> None:
+        """Update a study session."""
+        self.db.collection("study_sessions").document(session_id).update(data)
+
+    async def update_feynman_mastery(self, session_id: str, topic: str, score: int) -> None:
+        """Update the mastery score for a specific topic in a Feynman session."""
+        session_ref = self.db.collection("study_sessions").document(session_id)
+        
+        # Use a nested field update to avoid overwriting other topics
+        # Structure: feynman_mastery: { topic: { score: int, updated_at: datetime } }
+        update_path = f"feynman_mastery.{topic}"
+        session_ref.update({
+            update_path: {
+                "score": score,
+                "updated_at": datetime.utcnow()
+            }
+        })

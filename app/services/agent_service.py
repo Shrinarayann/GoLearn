@@ -3,7 +3,7 @@ Agent service.
 Runs ADK agents from FastAPI endpoints using the ADK Runner.
 """
 
-from typing import Optional
+from typing import Optional, List, Dict
 import google.generativeai as genai
 from google.genai import types
 from google.adk.runners import Runner
@@ -58,6 +58,9 @@ _feynman_runner = Runner(
     app_name="golearn",
     session_service=_session_service
 )
+
+# LLM for one-off evaluations and greetings
+llm = genai.GenerativeModel("gemini-1.5-flash")
 
 
 async def run_comprehension(
@@ -337,7 +340,8 @@ Be supportive and use simple terms. Max 3 sentences."""
 async def run_feynman_chat(
     user_message: str,
     session_id: str,
-    study_context: dict
+    study_context: dict,
+    topic: Optional[str] = None
 ) -> str:
     """
     Run the Feynman Technique chat using ADK.
@@ -364,13 +368,19 @@ async def run_feynman_chat(
 
     if not session:
         # First message - include context in state
+        state = {"study_context": study_context}
+        if topic:
+            state["current_topic"] = topic
         await _session_service.create_session(
             app_name="golearn",
             user_id="golearn",
             session_id=adk_session_id,
-            state={"study_context": study_context},
+            state=state,
         )
         logger.info(f"Created Feynman ADK session: {adk_session_id}")
+    elif topic:
+        # Update current topic in session state
+        session.state["current_topic"] = topic
     
     # Create the message content
     message = types.Content(
@@ -401,7 +411,8 @@ async def run_feynman_chat(
 
 async def generate_feynman_greeting(
     session_id: str,
-    study_context: dict
+    study_context: dict,
+    topic: Optional[str] = None
 ) -> str:
     """
     Generate an initial, contextual greeting from the Feynman student.
@@ -434,7 +445,10 @@ async def generate_feynman_greeting(
         )
     
     # Send a prompt to the agent to generate a greeting
-    prompt = "Introduce yourself as a curious student who wants to learn about this topic. Based on the study_context, pick one specific concept you find most interesting or confusing and ask me to explain it simply to you."
+    if topic:
+        prompt = f"Introduce yourself as a curious student who wants to learn about '{topic}'. Ask me to explain it simply to you as if I'm starting from scratch. Be enthusiastic!"
+    else:
+        prompt = "Introduce yourself as a curious student who wants to learn about this topic. Based on the study_context, pick one specific concept you find most interesting or confusing and ask me to explain it simply to you."
     
     message = types.Content(
         role="user",
@@ -458,6 +472,65 @@ async def generate_feynman_greeting(
         return "Hi! I'm really curious about what you're studying. Could you explain it to me?"
     
     return final_response_text
+
+
+async def evaluate_mastery(
+    transcript: List[dict],
+    topic: str,
+    study_context: dict
+) -> dict:
+    """
+    Use an LLM to evaluate the user's mastery of a topic based on a chat transcript.
+    
+    Returns:
+        {"score": int, "feedback": str}
+    """
+    # Build a string from the transcript
+    transcript_str = ""
+    for msg in transcript:
+        role = "User (Teacher)" if msg["role"] == "user" else "AI (Student)"
+        transcript_str += f"{role}: {msg['content']}\n"
+    
+    prompt = f"""
+    You are an expert educational evaluator. Your task is to assess a user's mastery of the topic: "{topic}".
+    
+    The user is using the Feynman Technique (explaining a concept to a novice student).
+    Below is the interaction transcript between the user (Teacher) and an AI (Novice Student).
+    
+    Study Context for reference:
+    {json.dumps(study_context, indent=2)}
+    
+    Conversation Transcript:
+    {transcript_str}
+    
+    Based on the clarity, accuracy, and simplicity of the user's explanations, provide:
+    1. A mastery score from 0 to 100.
+    2. Brief, constructive feedback on what they explained well and what gaps remain.
+    
+    Return ONLY a JSON object:
+    {{
+        "score": 85,
+        "feedback": "Your explanation of [Concept] was excellent and used great analogies. However, you seemed a bit vague on [Sub-topic]..."
+    }}
+    """
+    
+    try:
+        response = llm.generate_content(prompt)
+        result = _parse_json_response(response.text, "mastery_evaluator")
+        
+        # Ensure score is an int
+        if "score" in result:
+            try:
+                result["score"] = int(result["score"])
+            except:
+                result["score"] = 0
+        else:
+            result["score"] = 0
+            
+        return result
+    except Exception as e:
+        logger.error(f"Mastery evaluation failed: {e}")
+        return {"score": 0, "feedback": "Evaluation failed. Try teaching more!"}
 
 
 def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:

@@ -13,6 +13,14 @@ interface Message {
     text: string;
 }
 
+interface FeynmanTopic {
+    name: string;
+    mastery?: {
+        score: number;
+        updated_at?: string;
+    };
+}
+
 export default function FeynmanPage() {
     const { user, token, loading } = useAuth();
     const router = useRouter();
@@ -23,8 +31,13 @@ export default function FeynmanPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [sending, setSending] = useState(false);
-    const [loadingGreeting, setLoadingGreeting] = useState(true);
+    const [loadingGreeting, setLoadingGreeting] = useState(false);
     const [error, setError] = useState("");
+    const [topics, setTopics] = useState<FeynmanTopic[]>([]);
+    const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+    const [showTopicModal, setShowTopicModal] = useState(false);
+    const [isEvaluating, setIsEvaluating] = useState(false);
+    const [evaluationResult, setEvaluationResult] = useState<{ score: number; feedback: string } | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -35,7 +48,7 @@ export default function FeynmanPage() {
 
     useEffect(() => {
         if (token && sessionId) {
-            loadSession();
+            loadInitialData();
         }
     }, [token, sessionId]);
 
@@ -43,26 +56,70 @@ export default function FeynmanPage() {
         scrollToBottom();
     }, [messages]);
 
-    const loadSession = async () => {
+    const loadInitialData = async () => {
         if (!token) return;
         try {
-            const data = await api.getSession(token, sessionId);
-            setSessionTitle(data.title);
+            const sessionData = await api.getSession(token, sessionId);
+            setSessionTitle(sessionData.title);
 
-            // Fetch contextual greeting
-            setLoadingGreeting(true);
-            const greetingData = await api.getFeynmanGreeting(token, sessionId);
+            const topicsData = await api.getFeynmanTopics(token, sessionId);
+            setTopics(topicsData.topics);
+
+            // If there's only one topic, select it automatically
+            if (topicsData.topics.length === 1) {
+                handleTopicSelect(topicsData.topics[0].name);
+            } else if (topicsData.topics.length > 0) {
+                setShowTopicModal(true);
+            } else {
+                // Fallback if no specific topics found
+                setError("No specific topics were identified in the analysis. Try explaining the main title!");
+                handleTopicSelect(sessionData.title);
+            }
+        } catch (error) {
+            console.error("Failed to load initial data:", error);
+            setError("Failed to load session context");
+        }
+    };
+
+    const handleTopicSelect = async (topic: string) => {
+        if (!token) return;
+        setSelectedTopic(topic);
+        setMessages([]);
+        setShowTopicModal(false);
+        setLoadingGreeting(true);
+        setError("");
+        setEvaluationResult(null);
+
+        try {
+            const greetingData = await api.getFeynmanGreeting(token, sessionId, topic);
             setMessages([{ role: "agent", text: greetingData.response }]);
         } catch (error) {
-            console.error("Failed to load session:", error);
-            setError("Failed to load session context");
-            // Fallback greeting
+            console.error("Failed to load greeting:", error);
             setMessages([{
                 role: "agent",
-                text: "Hi! I'm really curious about what you're studying. Could you explain it to me?"
+                text: `Hi! I'm really curious about ${topic}. Could you explain it to me?`
             }]);
         } finally {
             setLoadingGreeting(false);
+        }
+    };
+
+    const triggerEvaluation = async () => {
+        if (!token || !selectedTopic || messages.length < 4 || isEvaluating) return;
+
+        setIsEvaluating(true);
+        try {
+            const transcript = messages.map(m => ({ role: m.role, content: m.text }));
+            const result = await api.evaluateFeynmanMastery(token, sessionId, selectedTopic, transcript);
+            setEvaluationResult(result);
+
+            // Refresh topics to show new mastery %
+            const topicsData = await api.getFeynmanTopics(token, sessionId);
+            setTopics(topicsData.topics);
+        } catch (err) {
+            console.error("Evaluation failed:", err);
+        } finally {
+            setIsEvaluating(false);
         }
     };
 
@@ -81,8 +138,14 @@ export default function FeynmanPage() {
         setError("");
 
         try {
-            const result = await api.sendFeynmanMessage(token, sessionId, userMsg);
+            const result = await api.sendFeynmanMessage(token, sessionId, userMsg, selectedTopic || undefined);
             setMessages(prev => [...prev, { role: "agent", text: result.response }]);
+
+            // Auto-trigger evaluation every 5 user messages
+            const userMessageCount = messages.filter(m => m.role === 'user').length + 1;
+            if (userMessageCount >= 5 && userMessageCount % 5 === 0) {
+                triggerEvaluation();
+            }
         } catch (err) {
             console.error("Feynman chat failed:", err);
             setError("Something went wrong. Please try again.");
@@ -115,7 +178,20 @@ export default function FeynmanPage() {
                             <h1 className="text-base font-semibold text-[#172B4D] truncate">
                                 Learn with Feynman
                             </h1>
-                            <p className="text-xs text-[#6B778C] truncate">{sessionTitle}</p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-xs text-[#6B778C] truncate">{sessionTitle}</p>
+                                {selectedTopic && (
+                                    <>
+                                        <span className="text-[#DFE1E6]">•</span>
+                                        <button
+                                            onClick={() => setShowTopicModal(true)}
+                                            className="text-xs font-medium text-[#0052CC] hover:underline"
+                                        >
+                                            Topic: {selectedTopic}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -127,17 +203,37 @@ export default function FeynmanPage() {
                     {/* Welcome Card */}
                     <div className="bg-[#EAE6FF] rounded-lg p-4 mb-6 border border-[#DED9FF]">
                         <div className="flex gap-3">
-                            <div className="w-8 h-8 rounded-full bg-[#6554C0] flex items-center justify-center text-white flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-[#6554C0] flex items-center justify-center text-white flex-shrink-0 text-sm">
                                 🎓
                             </div>
-                            <div>
+                            <div className="flex-1 min-w-0">
                                 <h3 className="text-sm font-semibold text-[#403294]">The Feynman Technique</h3>
-                                <p className="text-xs text-[#403294]/80 mt-1">
+                                <p className="text-xs text-[#403294]/80 mt-0.5 leading-relaxed">
                                     Teach the concept to our AI student. If you can explain it simply enough for a beginner to understand, you've mastered it!
                                 </p>
                             </div>
                         </div>
                     </div>
+
+                    {/* Mastery Evaluation Card */}
+                    {evaluationResult && (
+                        <div className="bg-white border-2 border-[#36B37E] rounded-xl p-5 mb-6 shadow-sm">
+                            <div className="flex items-center gap-3 mb-3">
+                                <div className="w-10 h-10 rounded-full bg-[#E3FCEF] flex items-center justify-center text-[#36B37E] font-bold text-lg">
+                                    {evaluationResult.score}%
+                                </div>
+                                <div>
+                                    <h4 className="text-sm font-bold text-[#172B4D]">Mastery Achievement</h4>
+                                    <p className="text-xs text-[#6B778C]">Based on your recent explanation</p>
+                                </div>
+                            </div>
+                            <div className="bg-[#F4F5F7] rounded-lg p-3 text-xs text-[#172B4D] italic leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {evaluationResult.feedback}
+                                </ReactMarkdown>
+                            </div>
+                        </div>
+                    )}
 
                     {messages.map((msg, i) => (
                         <div
@@ -236,6 +332,66 @@ export default function FeynmanPage() {
                     Shift + Enter for new line. Keep it simple and use analogies!
                 </p>
             </div>
+            {/* Topic Selection Modal */}
+            {showTopicModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-[#091E42]/50 backdrop-blur-sm" onClick={() => selectedTopic && setShowTopicModal(false)} />
+                    <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="p-6 border-b border-[#DFE1E6]">
+                            <h2 className="text-xl font-bold text-[#172B4D]">Select a Topic to Master</h2>
+                            <p className="text-sm text-[#6B778C] mt-1">Which concept would you like to explain today?</p>
+                        </div>
+                        <div className="p-2 max-h-[60vh] overflow-y-auto">
+                            {topics.map((topic, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => handleTopicSelect(topic.name)}
+                                    className={`w-full text-left p-4 rounded-lg transition-all border-2 mb-2 ${selectedTopic === topic.name
+                                        ? "border-[#0052CC] bg-[#DEEBFF]"
+                                        : "border-transparent hover:bg-[#F4F5F7]"
+                                        }`}
+                                >
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className={`font-semibold text-sm ${selectedTopic === topic.name ? "text-[#0052CC]" : "text-[#172B4D]"}`}>
+                                            {topic.name}
+                                        </span>
+                                        {topic.mastery && (
+                                            <span className="text-xs font-bold text-[#36B37E]">
+                                                {topic.mastery.score}% Mastered
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="w-full h-1.5 bg-[#DFE1E6] rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-[#36B37E] transition-all duration-500"
+                                            style={{ width: `${topic.mastery?.score || 0}%` }}
+                                        />
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="p-4 bg-[#F4F5F7] text-right">
+                            <button
+                                onClick={() => setShowTopicModal(false)}
+                                disabled={!selectedTopic}
+                                className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium disabled:opacity-50 hover:bg-[#0747A6] transition-colors shadow-sm"
+                            >
+                                {selectedTopic ? "Continue" : "Select a Topic"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Evaluation Spinner Overlay */}
+            {isEvaluating && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+                    <div className="bg-white/90 backdrop-blur-sm rounded-full px-6 py-3 shadow-xl border border-[#DFE1E6] flex items-center gap-3 animate-bounce">
+                        <div className="w-4 h-4 border-2 border-[#36B37E] border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-bold text-[#172B4D]">Evaluating your performance...</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
