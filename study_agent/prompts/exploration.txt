@@ -23,9 +23,4 @@ Provide your analysis as a JSON object with these exact keys:
   "visual_elements": ["diagram 1 description", "chart 1 description"]
 }
 
-IMPORTANT: 
-- Return ONLY the JSON object, no other text.
-- For diagram_interpretations, use numbered placeholders as keys: [IMAGE_1], [IMAGE_2], [IMAGE_3], etc.
-- Process diagrams sequentially (top to bottom, left to right) so [IMAGE_1] is the first diagram, [IMAGE_2] is the second, etc.
-- These placeholders will be replaced with actual images from the PDF.
-
+IMPORTANT: Return ONLY the JSON object, no other text.

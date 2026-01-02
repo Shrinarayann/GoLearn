@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
+import PomodoroTimer from "@/components/PomodoroTimer";
 
 interface SessionData {
     session_id: string;
@@ -192,13 +193,17 @@ export default function StudySessionPage() {
                                 {session?.title || "Loading..."}
                             </h1>
                         </div>
-                        {hasResults && activeTab === "application" && (
-                            <Link
-                                href={`/quiz/${sessionId}`}
-                                className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center"
-                            >
-                                Start Quiz
-                            </Link>
+                        {/* Timer and Quiz button - visible on all tabs when results exist */}
+                        {hasResults && (
+                            <div className="flex items-center gap-3">
+                                <PomodoroTimer autoStart={true} />
+                                <Link
+                                    href={`/quiz/${sessionId}`}
+                                    className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
+                                >
+                                    Start Quiz
+                                </Link>
+                            </div>
                         )}
                     </div>
                 </div>
