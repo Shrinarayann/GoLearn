@@ -2,12 +2,11 @@
 name = "golearn-study-agent"
 version = "0.1.0"
 description = "AI-powered Three-Pass Study Companion using Google ADK"
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
 dependencies = [
-    "google-adk>=0.1.0",
     "python-dotenv>=1.0.0",
     # FastAPI
     "fastapi>=0.109.0",
@@ -15,8 +14,9 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     # Firebase
     "firebase-admin>=6.4.0",
-    # Google AI
-    "google-generativeai>=0.3.0",
+    # Google AI (pinned versions to avoid conflicts)
+    "google-generativeai==0.8.3",
+    "google-ai-generativelanguage==0.6.10",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +28,8 @@ dev = [
 pdf = [
     "pypdf2>=3.0.0",
     "pdfplumber>=0.9.0",
+    "pymupdf>=1.23.0",
+    "pillow>=10.0.0",
 ]
 ppt = [
     "python-pptx>=0.6.21",
