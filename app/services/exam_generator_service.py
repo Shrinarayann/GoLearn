@@ -384,7 +384,7 @@ Diagram description: {description}"""
         
         # Generate image using Gemini
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.5-flash-image",
             contents=prompt,
             config=google_genai.types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"]
