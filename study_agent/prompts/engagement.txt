@@ -39,5 +39,5 @@ Provide your analysis as a comprehensive JSON object with these exact keys:
 IMPORTANT: 
 - Return ONLY the JSON object, no other text.
 - For diagram_interpretations, use numbered placeholders as keys: [IMAGE_1], [IMAGE_2], [IMAGE_3], etc.
-- Process diagrams sequentially (top to bottom, left to right) so [IMAGE_1] is the first diagram, [IMAGE_2] is the second, etc.
+- Process diagrams sequentially (top to bottom, left to right) so [IMAGE_1] is the first diagram, [IMAGE_2] is the second, etc.. make sure this order is correct - this is vital - top to bottom, left to right.
 - These placeholders will be replaced with actual images from the PDF.

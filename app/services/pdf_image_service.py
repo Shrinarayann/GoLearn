@@ -164,7 +164,7 @@ def extract_images_from_pdf_bytes_as_base64(
 ) -> Dict[str, Any]:
     """
     Extracts images from PDF bytes and returns them as base64-encoded strings.
-    Useful for uploaded files. Does NOT save images to disk.
+    Images are automatically sorted by reading order (page, then top-to-bottom, left-to-right).
     
     Parameters:
     - pdf_bytes: PDF file content as bytes
@@ -174,12 +174,12 @@ def extract_images_from_pdf_bytes_as_base64(
     - deduplicate: Avoids processing same image multiple times
     
     Returns:
-    - Dict with total count and list of base64-encoded images with metadata
+    - Dict with total count and list of base64-encoded images with metadata, sorted by position
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     
     seen_xrefs = set()
-    images_data = []
+    images_with_positions = []  # Collect images with position data for sorting
     
     for page_index in range(len(doc)):
         page = doc[page_index]
@@ -202,6 +202,24 @@ def extract_images_from_pdf_bytes_as_base64(
             if width < min_width or height < min_height:
                 continue
             
+            # Get image position on page using get_image_rects()
+            # This returns a list of Rect objects where the image appears
+            try:
+                rects = page.get_image_rects(xref)
+                if rects:
+                    # Use the first rect (primary position)
+                    rect = rects[0]
+                    y_pos = rect.y0  # Top of image
+                    x_pos = rect.x0  # Left of image
+                else:
+                    # Fallback: use image index as position proxy
+                    y_pos = img_index * 100
+                    x_pos = 0
+            except Exception:
+                # Fallback if get_image_rects fails
+                y_pos = img_index * 100
+                x_pos = 0
+            
             image_bytes = base_image["image"]
             image_ext = base_image["ext"]
             
@@ -220,18 +238,37 @@ def extract_images_from_pdf_bytes_as_base64(
             # Determine MIME type
             mime_type = f"image/{image_ext}" if image_ext != 'jpg' else "image/jpeg"
             
-            images_data.append({
+            # Store with position data for sorting
+            images_with_positions.append({
                 "page": page_index + 1,
-                "index": len(images_data) + 1,
+                "y_pos": y_pos,
+                "x_pos": x_pos,
                 "format": image_ext,
                 "original_width": width,
                 "original_height": height,
                 "mime_type": mime_type,
                 "data_url": f"data:{mime_type};base64,{base64_image}",
-                "size_kb": len(optimized_bytes) / 1024  # Size in KB
+                "size_kb": len(optimized_bytes) / 1024
             })
     
     doc.close()
+    
+    # Sort by reading order: page first, then y-position (top to bottom), then x-position (left to right)
+    images_with_positions.sort(key=lambda img: (img["page"], img["y_pos"], img["x_pos"]))
+    
+    # Build final images list with sequential index
+    images_data = []
+    for idx, img in enumerate(images_with_positions):
+        images_data.append({
+            "page": img["page"],
+            "index": idx + 1,
+            "format": img["format"],
+            "original_width": img["original_width"],
+            "original_height": img["original_height"],
+            "mime_type": img["mime_type"],
+            "data_url": img["data_url"],
+            "size_kb": img["size_kb"]
+        })
     
     return {
         "total_images": len(images_data),
