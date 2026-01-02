@@ -17,6 +17,9 @@ dependencies = [
     # Google AI (pinned versions to avoid conflicts)
     "google-generativeai==0.8.3",
     "google-ai-generativelanguage==0.6.10",
+    # Google Gen AI SDK (ADK - Agent Development Kit)
+    "google-genai>=1.0.0",
+    "google-adk>=1.0.0",
     # PDF processing (required for pdf_image_service)
     "pymupdf>=1.23.0",
     "pillow>=10.0.0",
