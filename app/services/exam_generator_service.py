@@ -130,9 +130,24 @@ async def generate_exam(
             except Exception:
                 pass
         
-        # TODO: Generate diagrams using NanoBanana API for questions with needs_diagram=True
-        # For now, we skip diagram generation
+        # Generate diagrams using Gemini for questions with needs_diagram=True
         diagram_images: Dict[str, bytes] = {}
+        diagram_questions = [q for q in questions if q.get('needs_diagram', False)]
+        
+        if diagram_questions:
+            logger.info(f"Generating {len(diagram_questions)} diagrams...")
+            for q in diagram_questions:
+                question_num = str(q.get('question_number', 0))
+                diagram_desc = q.get('diagram_description', '')
+                
+                if diagram_desc:
+                    try:
+                        image_bytes = await _generate_diagram_image(diagram_desc)
+                        if image_bytes:
+                            diagram_images[question_num] = image_bytes
+                            logger.info(f"Generated diagram for Q{question_num}")
+                    except Exception as e:
+                        logger.error(f"Failed to generate diagram for Q{question_num}: {e}")
         
         # Generate PDF
         pdf_bytes = generate_exam_pdf(
@@ -336,3 +351,69 @@ def _parse_json_response(text: str) -> dict:
     
     logger.warning(f"Failed to parse exam JSON. Raw text: {original_text[:500]}...")
     return {"section_a": [], "section_b": [], "section_c": [], "parse_error": True}
+
+
+async def _generate_diagram_image(description: str) -> Optional[bytes]:
+    """
+    Generate a diagram image using Gemini's image generation model.
+    
+    Args:
+        description: Text description of the diagram to generate
+        
+    Returns:
+        Image bytes (PNG format) or None if generation fails
+    """
+    from google import genai as google_genai
+    from io import BytesIO
+    
+    try:
+        # Create client with existing API key
+        client = google_genai.Client(api_key=settings.GOOGLE_API_KEY)
+        
+        # Generate prompt for educational diagram
+        prompt = f"""Create a clear, professional educational diagram for an exam paper.
+The diagram should be:
+- Simple and easy to understand
+- Black and white or minimal colors
+- Suitable for printing
+- Labeled clearly
+
+Diagram description: {description}"""
+        
+        logger.info(f"Generating diagram: {description[:100]}...")
+        
+        # Generate image using Gemini
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-exp",
+            contents=prompt,
+            config=google_genai.types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"]
+            )
+        )
+        
+        # Extract image from response
+        for part in response.candidates[0].content.parts:
+            if hasattr(part, 'inline_data') and part.inline_data:
+                # Get image data
+                image_data = part.inline_data.data
+                mime_type = part.inline_data.mime_type
+                
+                logger.info(f"Generated image: {mime_type}, {len(image_data)} bytes")
+                
+                # Convert to PNG if needed
+                if mime_type != "image/png":
+                    from PIL import Image
+                    img = Image.open(BytesIO(image_data))
+                    png_buffer = BytesIO()
+                    img.save(png_buffer, format="PNG")
+                    return png_buffer.getvalue()
+                
+                return image_data
+        
+        logger.warning("No image found in Gemini response")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Diagram generation failed: {e}")
+        return None
+
