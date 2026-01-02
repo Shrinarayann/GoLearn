@@ -1,10 +1,13 @@
 """
 Agent service.
-Runs ADK agents from FastAPI endpoints.
+Runs ADK agents from FastAPI endpoints using the ADK Runner.
 """
 
 from typing import Optional
 import google.generativeai as genai
+from google.genai import types
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
 import httpx
 import tempfile
 import os
@@ -15,10 +18,8 @@ from datetime import datetime
 
 from ..config import settings
 
-# Import ADK agents
-from study_agent.comprehension.exploration_agent import exploration_agent
-from study_agent.comprehension.engagement_agent import engagement_agent
-from study_agent.comprehension.application_agent import application_agent
+# Import ADK comprehension orchestrator
+from study_agent.comprehension.orchestrator import comprehension_orchestrator
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -37,22 +38,18 @@ logging.basicConfig(
     ]
 )
 
-# Configure Gemini (still needed for fallback/testing)
+# Configure Gemini API
 genai.configure(api_key=settings.GOOGLE_API_KEY)
 
-# Load agent prompts from study_agent/prompts/
-PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'study_agent', 'prompts')
+# Create a singleton session service for ADK
+_session_service = InMemorySessionService()
 
-def _load_prompt(filename: str) -> str:
-    """Load prompt template from file."""
-    path = os.path.join(PROMPTS_DIR, filename)
-    with open(path, 'r') as f:
-        return f.read()
-
-# Load the actual agent prompts
-EXPLORATION_PROMPT = _load_prompt('exploration.txt')
-ENGAGEMENT_PROMPT = _load_prompt('engagement.txt')
-APPLICATION_PROMPT = _load_prompt('application.txt')
+# Create the ADK Runner for comprehension
+_comprehension_runner = Runner(
+    agent=comprehension_orchestrator,
+    app_name="golearn",
+    session_service=_session_service
+)
 
 
 async def run_comprehension(
@@ -62,9 +59,10 @@ async def run_comprehension(
     pdf_bytes: Optional[bytes] = None
 ) -> dict:
     """
-    Run the three-pass comprehension on content.
+    Run the three-pass comprehension using ADK agents.
     
-    Optimized to do all 3 passes in a SINGLE API call to avoid rate limits.
+    Uses the ADK Runner to properly execute the comprehension_orchestrator,
+    which runs exploration_agent -> engagement_agent -> application_agent in sequence.
     
     Args:
         content: Text content to analyze
@@ -75,10 +73,6 @@ async def run_comprehension(
     Returns:
         dict with exploration, engagement, and application results
     """
-    model = genai.GenerativeModel(settings.GEMINI_MODEL)
-    
-    # Build content parts for multimodal input
-    content_parts = []
     uploaded_file = None
     
     # If we have a PDF URL, download it
@@ -89,9 +83,12 @@ async def run_comprehension(
                 if response.status_code == 200:
                     pdf_bytes = response.content
         except Exception as e:
-            print(f"Failed to download PDF: {e}")
+            logger.error(f"Failed to download PDF: {e}")
     
-    # If we have PDF bytes, upload to Gemini
+    # Build message content parts
+    content_parts = []
+    
+    # If we have PDF bytes, upload to Gemini and create a Part
     if pdf_bytes:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_bytes)
@@ -99,59 +96,89 @@ async def run_comprehension(
         
         try:
             uploaded_file = genai.upload_file(tmp_path, mime_type="application/pdf")
-            content_parts.append(uploaded_file)
+            # Create a Part from the uploaded file URI
+            content_parts.append(types.Part.from_uri(
+                file_uri=uploaded_file.uri,
+                mime_type="application/pdf"
+            ))
+            logger.info(f"Uploaded PDF to Gemini: {uploaded_file.name}")
         finally:
             os.unlink(tmp_path)
     
     # Add text content if provided
     if content:
-        content_parts.append(content)
+        content_parts.append(types.Part.from_text(content))
     
     # If no content at all, error
     if not content_parts:
         raise ValueError("No content provided for analysis")
     
-    logger.info(f"\n{'='*80}\nSTARTING THREE-PASS ANALYSIS (Session: {session_id})\n{'='*80}")
+    logger.info(f"\n{'='*80}\nSTARTING ADK THREE-PASS ANALYSIS (Session: {session_id})\n{'='*80}")
     logger.info(f"Model: {settings.GEMINI_MODEL}")
     logger.info(f"Content length: {len(content) if content else 0} chars")
     logger.info(f"Has PDF: {pdf_bytes is not None}")
     
-    # === Run three separate agent passes using actual ADK prompts ===
-    
-    # PASS 1: EXPLORATION
-    logger.info(f"\n{'-'*80}\nPASS 1: EXPLORATION AGENT\n{'-'*80}")
-    exploration_response = model.generate_content(content_parts + [EXPLORATION_PROMPT])
-    logger.info(f"Raw Response:\n{exploration_response.text}\n")
-    exploration_result = _parse_json_response(exploration_response.text, "Exploration")
-    
-    # PASS 2: ENGAGEMENT (with context from exploration)
-    logger.info(f"\n{'-'*80}\nPASS 2: ENGAGEMENT AGENT\n{'-'*80}")
-    engagement_prompt_with_context = ENGAGEMENT_PROMPT.replace(
-        "{exploration_result}", 
-        json.dumps(exploration_result, indent=2)
+    # Create the message content
+    message = types.Content(
+        role="user",
+        parts=content_parts
     )
-    engagement_response = model.generate_content(content_parts + [engagement_prompt_with_context])
-    logger.info(f"Raw Response:\n{engagement_response.text}\n")
-    engagement_result = _parse_json_response(engagement_response.text, "Engagement")
     
-    # PASS 3: APPLICATION (with context from previous passes)
-    logger.info(f"\n{'-'*80}\nPASS 3: APPLICATION AGENT\n{'-'*80}")
-    application_prompt_with_context = APPLICATION_PROMPT.replace(
-        "{exploration_result}",
-        json.dumps(exploration_result, indent=2)
-    ).replace(
-        "{engagement_result}",
-        json.dumps(engagement_result, indent=2)
+    # Create a fresh ADK session for this comprehension run
+    # This is needed because InMemorySessionService doesn't auto-create sessions
+    await _session_service.create_session(
+        app_name="golearn",
+        user_id="golearn",
+        session_id=session_id,
+        state={},  # Empty initial state
     )
-    application_response = model.generate_content(content_parts + [application_prompt_with_context])
-    logger.info(f"Raw Response:\n{application_response.text}\n")
-    application_result = _parse_json_response(application_response.text, "Application")
+    logger.info(f"Created ADK session: {session_id}")
     
-    # Log summary
+    # Run the ADK agent
+    final_response = None
+    try:
+        async for event in _comprehension_runner.run_async(
+            user_id="golearn",
+            session_id=session_id,
+            new_message=message
+        ):
+            # Log each agent event
+            if hasattr(event, 'author') and hasattr(event, 'content'):
+                logger.info(f"\n{'-'*40}\nAgent: {event.author}\n{'-'*40}")
+                if event.content:
+                    content_text = str(event.content)[:500]
+                    logger.info(f"Output: {content_text}...")
+                final_response = event
+    except Exception as e:
+        logger.error(f"ADK Runner error: {e}")
+        raise
+    
+    # Get the session to extract results from state
+    session = await _session_service.get_session(
+        app_name="golearn",
+        user_id="golearn",
+        session_id=session_id
+    )
+    
+    # Extract results from session state
+    state = session.state if session else {}
+    
+    exploration_result = state.get("exploration_result", {})
+    engagement_result = state.get("engagement_result", {})
+    application_result = state.get("application_result", {})
+    
+    # Parse JSON if results are strings
+    if isinstance(exploration_result, str):
+        exploration_result = _parse_json_response(exploration_result, "Exploration")
+    if isinstance(engagement_result, str):
+        engagement_result = _parse_json_response(engagement_result, "Engagement")
+    if isinstance(application_result, str):
+        application_result = _parse_json_response(application_result, "Application")
+    
     logger.info(f"\n{'='*80}\nCOMPREHENSION COMPLETE (Session: {session_id})\n{'='*80}")
-    logger.info(f"Exploration keys: {list(exploration_result.keys())}")
-    logger.info(f"Engagement keys: {list(engagement_result.keys())}")
-    logger.info(f"Application keys: {list(application_result.keys())}")
+    logger.info(f"Exploration keys: {list(exploration_result.keys()) if isinstance(exploration_result, dict) else 'N/A'}")
+    logger.info(f"Engagement keys: {list(engagement_result.keys()) if isinstance(engagement_result, dict) else 'N/A'}")
+    logger.info(f"Application keys: {list(application_result.keys()) if isinstance(application_result, dict) else 'N/A'}")
     logger.info(f"{'='*80}\n")
     
     result = {
@@ -178,6 +205,7 @@ async def generate_questions(
 ) -> list:
     """
     Generate quiz questions from comprehension results.
+    (Still using direct Gemini API - retention agents to be integrated later)
     """
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     
@@ -234,6 +262,7 @@ async def evaluate_answer(
 ) -> dict:
     """
     Evaluate a user's answer and provide feedback if incorrect.
+    (Still using direct Gemini API - retention agents to be integrated later)
     """
     model = genai.GenerativeModel(settings.GEMINI_MODEL)
     
