@@ -291,6 +291,12 @@ class ApiClient {
             body: { topic, transcript },
         });
     }
+
+    // Voice Chat
+    getVoiceWebSocketUrl(sessionId: string, token: string): string {
+        const wsBase = this.baseUrl.replace('http', 'ws');
+        return `${wsBase}/ws/feynman/${sessionId}/voice?token=${token}`;
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);

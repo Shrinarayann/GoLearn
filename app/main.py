@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import auth, study, quiz, dashboard, feynman
+from .routers import auth, study, quiz, dashboard, feynman, voice
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(study.router, prefix="/study", tags=["Study Sessions"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz & Retention"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(feynman.router, prefix="/feynman", tags=["Feynman Technique"])
+app.include_router(voice.router, prefix="/ws", tags=["Voice Chat"])
 
 
 @app.get("/")
