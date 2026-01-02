@@ -23,6 +23,7 @@ class SessionSummary(BaseModel):
     title: str
     status: str
     created_at: datetime
+    enable_spaced_repetition: bool = True  # Default True for existing sessions
 
 
 class SessionProgress(BaseModel):
@@ -62,6 +63,7 @@ async def get_dashboard_data(
             title=s["title"],
             status=s["status"],
             created_at=s["created_at"],
+            enable_spaced_repetition=s.get("enable_spaced_repetition", True),  # Default True
         )
         for s in sessions
     ]

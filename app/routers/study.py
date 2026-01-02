@@ -24,6 +24,7 @@ class CreateSessionRequest(BaseModel):
     """Request to create a new study session."""
     title: str
     content: Optional[str] = None  # Optional text content
+    enable_spaced_repetition: bool = True  # Enable quiz/spaced repetition (default: True)
 
 
 class SessionResponse(BaseModel):
@@ -33,6 +34,7 @@ class SessionResponse(BaseModel):
     title: str
     status: str
     created_at: datetime
+    enable_spaced_repetition: bool = True
     pdf_filename: Optional[str] = None
     exploration_result: Optional[dict] = None
     engagement_result: Optional[dict] = None
@@ -68,6 +70,7 @@ async def create_session(
         "status": "created",
         "created_at": datetime.utcnow(),
         "raw_content": request.content or "",
+        "enable_spaced_repetition": request.enable_spaced_repetition,
     }
     
     session_id = await db.create_session(session_data)
@@ -78,6 +81,7 @@ async def create_session(
         title=request.title,
         status="created",
         created_at=session_data["created_at"],
+        enable_spaced_repetition=request.enable_spaced_repetition,
     )
 
 
@@ -92,6 +96,7 @@ async def list_sessions(current_user: dict = Depends(get_current_user)):
             title=s["title"],
             status=s["status"],
             created_at=s["created_at"],
+            enable_spaced_repetition=s.get("enable_spaced_repetition", True),  # Default True for existing sessions
             pdf_filename=s.get("pdf_filename"),
             exploration_result=s.get("exploration_result"),
             engagement_result=s.get("engagement_result"),
@@ -122,11 +127,12 @@ async def get_session(
         )
     
     return SessionResponse(
-        session_id=session_id,
+        session_id=session["session_id"],
         user_id=session["user_id"],
         title=session["title"],
         status=session["status"],
         created_at=session["created_at"],
+        enable_spaced_repetition=session.get("enable_spaced_repetition", True),  # Default True for existing sessions
         pdf_filename=session.get("pdf_filename"),
         exploration_result=session.get("exploration_result"),
         engagement_result=session.get("engagement_result"),

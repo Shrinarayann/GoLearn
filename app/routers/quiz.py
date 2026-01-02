@@ -98,6 +98,13 @@ async def generate_quiz(
             detail="Session not found"
         )
     
+    # Check if spaced repetition is enabled for this session
+    if not session.get("enable_spaced_repetition", True):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Spaced repetition is disabled for this session"
+        )
+    
     if session["status"] not in ["ready", "quizzing"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
