@@ -12,7 +12,6 @@ from typing import Optional, Dict, List
 from datetime import datetime
 
 import google.generativeai as genai
-from google.genai import types
 
 from ..config import settings
 from .firebase import FirestoreService
@@ -249,16 +248,9 @@ OUTPUT FORMAT (strict JSON, no markdown):
 
 Generate the exam questions now. Output ONLY valid JSON, no explanations."""
 
-    # Create content with both PDF and text prompt
-    content_parts = [
-        types.Part.from_uri(
-            file_uri=uploaded_file.uri,
-            mime_type="application/pdf"
-        ),
-        types.Part.from_text(prompt)
-    ]
-    
-    response = model.generate_content(content_parts)
+    # Generate content with both the uploaded file and text prompt
+    # Use google.generativeai native format (not google.genai types)
+    response = model.generate_content([uploaded_file, prompt])
     
     logger.info(f"Gemini response for exam generation:\n{response.text[:1000]}...")
     

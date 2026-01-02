@@ -100,11 +100,11 @@ def generate_exam_pdf(
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(66, 82, 110)  # #42526E
     instructions = [
-        "• Answer ALL questions from each section.",
-        "• Section A contains 2-mark questions (short answers).",
-        "• Section B contains 6-mark questions (conceptual, may include diagrams).",
-        "• Section C contains 12-mark questions (analytical, may include diagrams).",
-        f"• Total marks: {sum(q.get('marks', 0) for q in questions)}",
+        "- Answer ALL questions from each section.",
+        "- Section A contains 2-mark questions (short answers).",
+        "- Section B contains 6-mark questions (conceptual, may include diagrams).",
+        "- Section C contains 12-mark questions (analytical, may include diagrams).",
+        f"- Total marks: {sum(q.get('marks', 0) for q in questions)}",
     ]
     for instruction in instructions:
         pdf.cell(0, 6, instruction, new_x='LMARGIN', new_y='NEXT')
