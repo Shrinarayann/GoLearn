@@ -24,11 +24,13 @@ interface ExplorationResult {
     visual_elements?: string[];
 }
 
-// New interface for diagram interpretations with images
-interface DiagramInterpretation {
-    image_index: number | null;
-    placeholder: string;
-    description: string;
+// New interface for image captions
+interface ImageCaption {
+    image_index: number;
+    caption: string;
+    type: string;
+    relevance: string;
+    key_points: string[];
     has_image: boolean;
     image_url: string | null;
 }
@@ -37,7 +39,8 @@ interface EngagementResult {
     summary?: string;
     detailed_analysis?: string;
     concept_explanations?: Record<string, string>;
-    diagram_interpretations?: DiagramInterpretation[] | Record<string, string>;  // Support both formats
+    image_captions?: ImageCaption[];  // New format
+    diagram_interpretations?: any;  // Legacy support
     definitions?: Record<string, string>;
     formulas?: Record<string, string>;
     examples?: string[];
@@ -70,6 +73,7 @@ export default function StudySessionPage() {
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState("");
     const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+    const [pdfFile, setPdfFile] = useState<File | null>(null); // Store actual PDF file
     const [activeTab, setActiveTab] = useState<TabType>("exploration");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,26 +104,15 @@ export default function StudySessionPage() {
     };
 
     const handleFileUpload = async (file: File) => {
-        if (!token) return;
-
         if (!file.name.toLowerCase().endsWith(".pdf")) {
             setError("Only PDF files are supported");
             return;
         }
 
-        setUploading(true);
+        // Just store the file, don't upload to server yet
+        setPdfFile(file);
+        setUploadedFile(file.name);
         setError("");
-
-        try {
-            const result = await api.uploadPdf(token, sessionId, file);
-            setUploadedFile(result.filename);
-            setSession(prev => prev ? { ...prev, status: "uploaded" } : null);
-        } catch (error) {
-            console.error("Upload failed:", error);
-            setError("Failed to upload PDF. Please try again.");
-        } finally {
-            setUploading(false);
-        }
     };
 
     const handleDrop = (e: React.DragEvent) => {
@@ -129,7 +122,7 @@ export default function StudySessionPage() {
     };
 
     const runComprehension = async () => {
-        if (!token || (!content.trim() && !uploadedFile)) {
+        if (!token || (!content.trim() && !pdfFile)) {
             setError("Please upload a PDF or paste your study content");
             return;
         }
@@ -138,7 +131,13 @@ export default function StudySessionPage() {
         setError("");
 
         try {
-            const result = await api.runComprehension(token, sessionId, content || undefined);
+            // Send PDF file directly with comprehension request
+            const result = await api.runComprehension(
+                token,
+                sessionId,
+                content || undefined,
+                pdfFile || undefined
+            );
             setSession((prev) =>
                 prev
                     ? {
@@ -468,7 +467,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
 
     // Define standard fields with custom rendering
     const standardFields = new Set([
-        'summary', 'detailed_analysis', 'concept_explanations', 'diagram_interpretations',
+        'summary', 'detailed_analysis', 'concept_explanations', 'image_captions', 'diagram_interpretations',
         'definitions', 'formulas', 'examples', 'relationships', 'misconceptions', 'key_insights'
     ]);
 
@@ -495,48 +494,58 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                 </div>
             )}
 
-            {/* Diagram Interpretations */}
-            {data.diagram_interpretations && (Array.isArray(data.diagram_interpretations) ? data.diagram_interpretations.length > 0 : Object.keys(data.diagram_interpretations).length > 0) && (
+            {/* Image Captions */}
+            {data.image_captions && data.image_captions.length > 0 && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Visual Elements & Diagrams</h3>
                     <div className="space-y-6">
-                        {Array.isArray(data.diagram_interpretations) ? (
-                            // New format: array with image_url
-                            data.diagram_interpretations.map((diagram, i) => (
-                                <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
-                                    <h4 className="font-semibold text-[#172B4D] mb-3 text-sm sm:text-base flex items-center gap-2">
+                        {data.image_captions.map((imageCaption, i) => (
+                            <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
+                                <div className="flex items-start justify-between mb-3">
+                                    <h4 className="font-semibold text-[#172B4D] text-sm sm:text-base flex items-center gap-2">
                                         <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                         </svg>
-                                        Diagram {(diagram.image_index ?? i) + 1}
+                                        Figure {imageCaption.image_index + 1}
                                     </h4>
-                                    {diagram.has_image && diagram.image_url && (
-                                        <div className="mb-4">
-                                            <img
-                                                src={diagram.image_url}
-                                                alt={`Diagram ${(diagram.image_index ?? i) + 1}`}
-                                                className="max-w-full h-auto rounded-lg shadow-md border border-gray-200"
-                                                style={{ maxHeight: '400px', objectFit: 'contain' }}
-                                            />
-                                        </div>
-                                    )}
-                                    <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{diagram.description}</p>
+                                    <div className="flex gap-2">
+                                        <span className="px-2 py-1 bg-white rounded text-xs font-medium text-[#6B778C]">
+                                            {imageCaption.type}
+                                        </span>
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${imageCaption.relevance === 'high' ? 'bg-[#DE350B] text-white' :
+                                                imageCaption.relevance === 'medium' ? 'bg-[#FFAB00] text-white' :
+                                                    'bg-[#6B778C] text-white'
+                                            }`}>
+                                            {imageCaption.relevance}
+                                        </span>
+                                    </div>
                                 </div>
-                            ))
-                        ) : (
-                            // Old format: object with key-value pairs
-                            Object.entries(data.diagram_interpretations).map(([name, interpretation], i) => (
-                                <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
-                                    <h4 className="font-semibold text-[#172B4D] mb-2 text-sm sm:text-base flex items-center gap-2">
-                                        <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                        </svg>
-                                        {name}
-                                    </h4>
-                                    <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{renderValue(interpretation)}</p>
-                                </div>
-                            ))
-                        )}
+                                {imageCaption.has_image && imageCaption.image_url && (
+                                    <div className="mb-4">
+                                        <img
+                                            src={imageCaption.image_url}
+                                            alt={`Figure ${imageCaption.image_index + 1}`}
+                                            className="max-w-full h-auto rounded-lg shadow-md border border-gray-200"
+                                            style={{ maxHeight: '400px', objectFit: 'contain' }}
+                                        />
+                                    </div>
+                                )}
+                                <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed mb-3">{imageCaption.caption}</p>
+                                {imageCaption.key_points && imageCaption.key_points.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-[#36B37E]/20">
+                                        <p className="text-xs font-semibold text-[#6B778C] mb-2">Key Points:</p>
+                                        <ul className="space-y-1">
+                                            {imageCaption.key_points.map((point, idx) => (
+                                                <li key={idx} className="flex items-start gap-2 text-xs text-[#172B4D]">
+                                                    <span className="text-[#36B37E] mt-0.5">•</span>
+                                                    <span>{point}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}

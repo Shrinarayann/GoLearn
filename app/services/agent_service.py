@@ -22,7 +22,7 @@ from ..config import settings
 from study_agent.comprehension.orchestrator import comprehension_orchestrator
 
 # Import PDF image extraction service
-from .pdf_image_service import extract_images_from_pdf_bytes_as_base64
+from .pdf_image_service import extract_images_from_pdf_bytes_as_base64, extract_text_from_pdf_bytes
 
 # Import Firebase storage service for image uploads
 from .storage_service import upload_extracted_images_to_storage
@@ -79,41 +79,64 @@ async def run_comprehension(
     Returns:
         dict with exploration, engagement, and application results
     """
-    uploaded_file = None
-    
-    # If we have a PDF URL, download it
-    if pdf_url and not pdf_bytes:
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(pdf_url)
-                if response.status_code == 200:
-                    pdf_bytes = response.content
-        except Exception as e:
-            logger.error(f"Failed to download PDF: {e}")
-    
     # Build message content parts
     content_parts = []
     
-    # If we have PDF bytes, upload to Gemini and create a Part
-    if pdf_bytes:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf_bytes)
-            tmp_path = tmp.name
-        
-        try:
-            uploaded_file = genai.upload_file(tmp_path, mime_type="application/pdf")
-            # Create a Part from the uploaded file URI
-            content_parts.append(types.Part.from_uri(
-                file_uri=uploaded_file.uri,
-                mime_type="application/pdf"
-            ))
-            logger.info(f"Uploaded PDF to Gemini: {uploaded_file.name}")
-        finally:
-            os.unlink(tmp_path)
+    # Extract text and images from PDF if provided
+    extracted_text = content or ""
+    extracted_images_data = []
     
-    # Add text content if provided
-    if content:
-        content_parts.append(types.Part.from_text(content))
+    if pdf_bytes:
+        try:
+            # Extract text from PDF
+            pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
+            if pdf_text.strip():
+                extracted_text = pdf_text if not content else f"{content}\n\n{pdf_text}"
+            logger.info(f"Extracted {len(pdf_text)} characters of text from PDF")
+            
+            # Extract images from PDF (ordered by position)
+            image_extraction_result = extract_images_from_pdf_bytes_as_base64(pdf_bytes)
+            extracted_images_data = image_extraction_result.get("images", [])
+            logger.info(f"Extracted {len(extracted_images_data)} images from PDF")
+        except Exception as e:
+            logger.error(f"Failed to extract from PDF: {e}")
+    
+    # Add text content
+    if extracted_text:
+        content_parts.append(types.Part(text=extracted_text))
+    
+    # Add images as inline data with text markers so LLM knows the order
+    if extracted_images_data:
+        logger.info(f"Adding {len(extracted_images_data)} images to LLM input with markers")
+        # Add intro text for images section
+        content_parts.append(types.Part(text=f"\n\n=== IMAGES FROM THE DOCUMENT ({len(extracted_images_data)} total) ===\nThe following images are extracted from the document in reading order (top to bottom, left to right). Please provide captions for each image in this exact order.\n"))
+        
+        for idx, img_data in enumerate(extracted_images_data):
+            try:
+                # Get the base64 data from data_url
+                data_url = img_data.get("data_url", "")
+                if data_url and "base64," in data_url:
+                    # Add text marker BEFORE the image
+                    content_parts.append(types.Part(text=f"\n--- IMAGE {idx + 1} of {len(extracted_images_data)} ---"))
+                    
+                    # Extract base64 part from data URL
+                    base64_data = data_url.split("base64,")[1]
+                    mime_type = img_data.get("mime_type", "image/jpeg")
+                    
+                    # Create inline data Part for the image
+                    content_parts.append(types.Part(
+                        inline_data=types.Blob(
+                            mime_type=mime_type,
+                            data=base64_data
+                        )
+                    ))
+                    logger.info(f"Added image {idx + 1} with marker to LLM input")
+            except Exception as e:
+                logger.error(f"Failed to add image {idx} to LLM input: {e}")
+        
+        # Add closing marker
+        content_parts.append(types.Part(text="\n=== END OF IMAGES ===\n"))
+    
     
     # If no content at all, error
     if not content_parts:
@@ -121,8 +144,9 @@ async def run_comprehension(
     
     logger.info(f"\n{'='*80}\nSTARTING ADK THREE-PASS ANALYSIS (Session: {session_id})\n{'='*80}")
     logger.info(f"Model: {settings.GEMINI_MODEL}")
-    logger.info(f"Content length: {len(content) if content else 0} chars")
-    logger.info(f"Has PDF: {pdf_bytes is not None}")
+    logger.info(f"Content length: {len(extracted_text)} chars")
+    logger.info(f"Images to process: {len(extracted_images_data)}")
+    logger.info(f"Total Parts in message: {len(content_parts)}")
     
     # Create the message content
     message = types.Content(
@@ -190,79 +214,113 @@ async def run_comprehension(
     import copy
     engagement_for_response = copy.deepcopy(engagement_result) if isinstance(engagement_result, dict) else engagement_result
     
-    # Extract images from PDF, upload to Firebase, and annotate engagement result
-    extracted_images = []
+    # Upload images to Firebase and annotate engagement result with URLs
     firebase_images = []
-    if pdf_bytes:
+    if extracted_images_data:
         try:
-            # Step 1: Extract images as base64
-            image_extraction_result = extract_images_from_pdf_bytes_as_base64(pdf_bytes)
-            extracted_images = image_extraction_result.get("images", [])
-            logger.info(f"Extracted {len(extracted_images)} images from PDF")
+            # Upload images to Firebase Storage
+            firebase_images = await upload_extracted_images_to_storage(
+                session_id=session_id,
+                images=extracted_images_data
+            )
+            logger.info(f"Uploaded {len(firebase_images)} images to Firebase Storage")
             
-            # Step 2: Upload images to Firebase Storage
-            if extracted_images:
-                firebase_images = await upload_extracted_images_to_storage(
-                    session_id=session_id,
-                    images=extracted_images
-                )
-                logger.info(f"Uploaded {len(firebase_images)} images to Firebase Storage")
-            
-            # Step 3: Annotate diagram_interpretations with Firebase URLs
-            if isinstance(engagement_for_response, dict) and "diagram_interpretations" in engagement_for_response:
-                diagram_interps = engagement_for_response["diagram_interpretations"]
-                if isinstance(diagram_interps, dict):
-                    annotated_diagram_interps = []
-                    for key, value in diagram_interps.items():
-                        # Check if key is a placeholder like [IMAGE_1], [IMAGE_2], etc.
-                        if key.startswith("[IMAGE_") and key.endswith("]"):
-                            try:
-                                # Extract image index (1-based)
-                                image_num = int(key[7:-1])  # Extract number from [IMAGE_N]
-                                image_idx = image_num - 1   # Convert to 0-based index
-                                
-                                # Find corresponding Firebase URL
-                                firebase_url = None
-                                if 0 <= image_idx < len(firebase_images):
-                                    firebase_url = firebase_images[image_idx].get("firebase_url")
-                                
-                                annotated_diagram_interps.append({
-                                    "image_index": image_idx,
-                                    "placeholder": key,
-                                    "description": value,
-                                    "has_image": firebase_url is not None,
-                                    "image_url": firebase_url  # Direct Firebase URL for frontend
-                                })
-                                logger.info(f"Annotated {key} with Firebase URL")
-                            except (ValueError, IndexError) as e:
-                                annotated_diagram_interps.append({
-                                    "image_index": None,
-                                    "placeholder": key,
-                                    "description": value,
-                                    "has_image": False,
-                                    "image_url": None
-                                })
-                                logger.warning(f"Failed to parse placeholder {key}: {e}")
-                        else:
-                            # Non-placeholder key (named diagram)
-                            annotated_diagram_interps.append({
-                                "image_index": None,
-                                "placeholder": key,
-                                "description": value,
-                                "has_image": False,
-                                "image_url": None
-                            })
+            # Annotate image_captions with Firebase URLs
+            if isinstance(engagement_for_response, dict) and "image_captions" in engagement_for_response:
+                captions = engagement_for_response.get("image_captions", [])
+                
+                if isinstance(captions, list):
+                    annotated_captions = []
                     
-                    # Replace dict with array of annotated diagrams (for API response only)
-                    engagement_for_response["diagram_interpretations"] = annotated_diagram_interps
+                    # Map captions to images by index
+                    for idx, caption_obj in enumerate(captions):
+                        # Get corresponding Firebase image
+                        firebase_url = None
+                        if idx < len(firebase_images):
+                            firebase_url = firebase_images[idx].get("firebase_url")
+                        
+                        # Handle both dict and string captions
+                        if isinstance(caption_obj, dict):
+                            annotated_caption = {
+                                "image_index": idx,
+                                "caption": caption_obj.get("caption", ""),
+                                "type": caption_obj.get("type", "unknown"),
+                                "relevance": caption_obj.get("relevance", "medium"),
+                                "key_points": caption_obj.get("key_points", []),
+                                "has_image": firebase_url is not None,
+                                "image_url": firebase_url
+                            }
+                        else:
+                            # Fallback for string captions
+                            annotated_caption = {
+                                "image_index": idx,
+                                "caption": str(caption_obj),
+                                "type": "unknown",
+                                "relevance": "medium",
+                                "key_points": [],
+                                "has_image": firebase_url is not None,
+                                "image_url": firebase_url
+                            }
+                        
+                        annotated_captions.append(annotated_caption)
+                        logger.info(f"Mapped caption {idx} to image with URL: {firebase_url is not None}")
+                    
+                    # Handle case where we have more images than captions (generate generic captions)
+                    if len(firebase_images) > len(captions):
+                        for idx in range(len(captions), len(firebase_images)):
+                            firebase_url = firebase_images[idx].get("firebase_url")
+                            annotated_captions.append({
+                                "image_index": idx,
+                                "caption": f"Figure {idx + 1}",
+                                "type": "unknown",
+                                "relevance": "medium",
+                                "key_points": [],
+                                "has_image": True,
+                                "image_url": firebase_url
+                            })
+                            logger.info(f"Generated generic caption for image {idx}")
+                    
+                    # Replace with annotated captions
+                    engagement_for_response["image_captions"] = annotated_captions
+                else:
+                    # If image_captions is not a list, create generic captions for all images
+                    annotated_captions = []
+                    for idx, firebase_img in enumerate(firebase_images):
+                        annotated_captions.append({
+                            "image_index": idx,
+                            "caption": f"Figure {idx + 1}",
+                            "type": "unknown",
+                            "relevance": "medium",
+                            "key_points": [],
+                            "has_image": True,
+                            "image_url": firebase_img.get("firebase_url")
+                        })
+                    engagement_for_response["image_captions"] = annotated_captions
+                    logger.warning("image_captions was not a list, generated generic captions")
+            elif firebase_images:
+                # If no image_captions field but we have images, create generic captions
+                annotated_captions = []
+                for idx, firebase_img in enumerate(firebase_images):
+                    annotated_captions.append({
+                        "image_index": idx,
+                        "caption": f"Figure {idx + 1}",
+                        "type": "unknown",
+                        "relevance": "medium",
+                        "key_points": [],
+                        "has_image": True,
+                        "image_url": firebase_img.get("firebase_url")
+                    })
+                engagement_for_response["image_captions"] = annotated_captions
+                logger.info(f"No image_captions in response, generated {len(annotated_captions)} generic captions")
+                
         except Exception as e:
-            logger.error(f"Image extraction/upload failed: {e}")
+            logger.error(f"Image upload/annotation failed: {e}")
     
     logger.info(f"\n{'='*80}\nCOMPREHENSION COMPLETE (Session: {session_id})\n{'='*80}")
     logger.info(f"Exploration keys: {list(exploration_result.keys()) if isinstance(exploration_result, dict) else 'N/A'}")
     logger.info(f"Engagement keys: {list(engagement_result.keys()) if isinstance(engagement_result, dict) else 'N/A'}")
     logger.info(f"Application keys: {list(application_result.keys()) if isinstance(application_result, dict) else 'N/A'}")
-    logger.info(f"Images extracted: {len(extracted_images)}")
+    logger.info(f"Images extracted: {len(extracted_images_data)}")
     logger.info(f"{'='*80}\n")
     
     result = {
@@ -270,19 +328,12 @@ async def run_comprehension(
         "exploration": exploration_result,
         "engagement": engagement_for_response,
         "application": application_result,
-        "extracted_images": extracted_images,
-        # For Firestore storage (original format)
+        "extracted_images": extracted_images_data,
+        # For Firestore storage (use annotated version so images persist)
         "exploration_for_storage": exploration_for_storage,
-        "engagement_for_storage": engagement_for_storage,
+        "engagement_for_storage": engagement_for_response,  # Save annotated version with image URLs
         "application_for_storage": application_for_storage,
     }
-    
-    # Clean up uploaded file
-    if uploaded_file:
-        try:
-            genai.delete_file(uploaded_file.name)
-        except Exception:
-            pass
     
     return result
 

@@ -124,7 +124,40 @@ class ApiClient {
         }>;
     }
 
-    async runComprehension(token: string, sessionId: string, content?: string) {
+    async runComprehension(token: string, sessionId: string, content?: string, pdfFile?: File) {
+        // Use FormData if we have a PDF file
+        if (pdfFile) {
+            const formData = new FormData();
+            formData.append("file", pdfFile);
+            if (content) {
+                // Create a JSON string for the request body
+                const blob = new Blob([JSON.stringify({ content })], { type: "application/json" });
+                formData.append("request", blob);
+            }
+
+            const response = await fetch(`${this.baseUrl}/study/sessions/${sessionId}/comprehend`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.detail || `API Error: ${response.status}`);
+            }
+
+            return response.json() as Promise<{
+                session_id: string;
+                status: string;
+                exploration: Record<string, unknown>;
+                engagement: Record<string, unknown>;
+                application: Record<string, unknown>;
+            }>;
+        }
+
+        // Otherwise use regular JSON request
         return this.request<{
             session_id: string;
             status: string;
