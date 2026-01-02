@@ -89,14 +89,18 @@ class FirestoreService:
             return data
         return None
     
-    async def get_user_sessions(self, user_id: str) -> List[dict]:
+    async def get_user_sessions(self, user_id: str, fields: Optional[List[str]] = None) -> List[dict]:
         """Get all sessions for a user."""
-        docs = (
+        query = (
             self.db.collection("study_sessions")
             .where("user_id", "==", user_id)
             .order_by("created_at", direction=firestore.Query.DESCENDING)
-            .stream()
         )
+        
+        if fields:
+            query = query.select(fields)
+            
+        docs = query.stream()
         sessions = []
         for doc in docs:
             data = doc.to_dict()
@@ -133,13 +137,17 @@ class FirestoreService:
     async def get_session_questions(
         self, 
         session_id: str, 
-        due_only: bool = False
+        due_only: bool = False,
+        fields: Optional[List[str]] = None
     ) -> List[dict]:
         """Get all questions for a session."""
         query = (
             self.db.collection("quiz_questions")
             .where("session_id", "==", session_id)
         )
+        
+        if fields:
+            query = query.select(fields)
         
         # Note: We don't filter by date here because Firestore datetime queries
         # can be complex. Instead, we return all questions and filter in the
@@ -156,14 +164,16 @@ class FirestoreService:
     async def get_user_questions(
         self, 
         user_id: str, 
-        due_only: bool = False
+        due_only: bool = False,
+        fields: Optional[List[str]] = None
     ) -> List[dict]:
         """
         Get all questions for a user across all their sessions.
         Returns questions with session metadata included.
         """
         # First, get all user sessions to build a session_id -> title map
-        sessions = await self.get_user_sessions(user_id)
+        # We only need session_id and title for the map
+        sessions = await self.get_user_sessions(user_id, fields=["title", "created_at"])
         session_map = {s["session_id"]: s.get("title", "Untitled") for s in sessions}
         session_ids = list(session_map.keys())
         
@@ -181,6 +191,9 @@ class FirestoreService:
                 .where("session_id", "in", batch_session_ids)
             )
             
+            if fields:
+                query = query.select(fields)
+            
             docs = query.stream()
             for doc in docs:
                 data = doc.to_dict()
@@ -194,6 +207,7 @@ class FirestoreService:
     async def update_question(self, question_id: str, data: dict) -> None:
         """Update a quiz question."""
         self.db.collection("quiz_questions").document(question_id).update(data)
+
 
     # --- Quiz Concepts (SRS Tracking) ---
 
@@ -235,4 +249,23 @@ class FirestoreService:
     async def update_concept(self, concept_id: str, data: dict) -> None:
         """Update SRS tracking for a concept."""
         self.db.collection("quiz_concepts").document(concept_id).update(data)
+
+
+    async def update_session(self, session_id: str, data: dict) -> None:
+        """Update a study session."""
+        self.db.collection("study_sessions").document(session_id).update(data)
+
+    async def update_feynman_mastery(self, session_id: str, topic: str, score: int) -> None:
+        """Update the mastery score for a specific topic in a Feynman session."""
+        session_ref = self.db.collection("study_sessions").document(session_id)
+        
+        # Use a nested field update to avoid overwriting other topics
+        # Structure: feynman_mastery: { topic: { score: int, updated_at: datetime } }
+        update_path = f"feynman_mastery.{topic}"
+        session_ref.update({
+            update_path: {
+                "score": score,
+                "updated_at": datetime.utcnow()
+            }
+        })
 

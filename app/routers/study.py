@@ -84,7 +84,10 @@ async def create_session(
 @router.get("/sessions", response_model=List[SessionResponse])
 async def list_sessions(current_user: dict = Depends(get_current_user)):
     """List all study sessions for the current user."""
-    sessions = await db.get_user_sessions(current_user["user_id"])
+    sessions = await db.get_user_sessions(
+        current_user["user_id"], 
+        fields=["session_id", "user_id", "title", "status", "created_at", "pdf_filename"]
+    )
     return [
         SessionResponse(
             session_id=s["session_id"],

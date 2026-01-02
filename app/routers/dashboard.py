@@ -53,7 +53,10 @@ async def get_dashboard_data(
     user_id = current_user["user_id"]
     
     # Get all user sessions (lightweight - no comprehension results)
-    sessions = await db.get_user_sessions(user_id)
+    sessions = await db.get_user_sessions(
+        user_id, 
+        fields=["session_id", "title", "status", "created_at"]
+    )
     
     # Build session summaries (only essential fields)
     session_summaries = [
@@ -91,6 +94,7 @@ async def get_dashboard_data(
         query = (
             db.db.collection("quiz_questions")
             .where("session_id", "in", batch_session_ids)
+            .select(["session_id", "leitner_box", "next_review_at"])
         )
         
         docs = query.stream()
