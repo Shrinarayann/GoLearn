@@ -182,12 +182,18 @@ async def upload_pdf(
 @router.post("/sessions/{session_id}/comprehend", response_model=ComprehensionResponse)
 async def run_comprehension_endpoint(
     session_id: str,
+    current_user: dict = Depends(get_current_user),
     request: ComprehensionRequest = None,
-    current_user: dict = Depends(get_current_user)
+    file: Optional[UploadFile] = File(None)
 ):
     """
     Run the three-pass comprehension on the study material.
     This executes exploration, engagement, and application agents.
+    
+    Can accept either:
+    - Text content in request body
+    - PDF file upload (processed directly, not stored)
+    - Both text and PDF
     """
     # Verify session ownership
     session = await db.get_session(session_id)
@@ -197,23 +203,30 @@ async def run_comprehension_endpoint(
             detail="Session not found"
         )
     
-    # Get content to analyze
+    # Get content and PDF bytes
     content = (request and request.content) or session.get("raw_content", "")
-    if not content and not session.get("pdf_url"):
+    pdf_bytes = None
+    
+    # If PDF file uploaded, read bytes directly
+    if file and file.filename.lower().endswith(".pdf"):
+        pdf_bytes = await file.read()
+    
+    # Check if we have any content to analyze
+    if not content and not pdf_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No content to analyze. Upload a PDF or provide text."
+            detail="No content to analyze. Provide text or upload a PDF."
         )
     
     # Update status
     await db.update_session(session_id, {"status": "comprehending"})
     
     try:
-        # Run comprehension agents
+        # Run comprehension agents (PDF bytes processed directly, not stored)
         results = await run_comprehension(
             content=content,
             session_id=session_id,
-            pdf_url=session.get("pdf_url")
+            pdf_bytes=pdf_bytes
         )
         
         # Save results to session (use _for_storage fields to avoid nested entity issues)

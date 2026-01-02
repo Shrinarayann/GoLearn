@@ -274,3 +274,27 @@ def extract_images_from_pdf_bytes_as_base64(
         "total_images": len(images_data),
         "images": images_data
     }
+
+
+def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """
+    Extract all text content from PDF bytes.
+    
+    Parameters:
+    - pdf_bytes: PDF file content as bytes
+    
+    Returns:
+    - Extracted text as a single string
+    """
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    
+    text_parts = []
+    for page_index in range(len(doc)):
+        page = doc[page_index]
+        text = page.get_text()
+        if text.strip():  # Only add non-empty pages
+            text_parts.append(text)
+    
+    doc.close()
+    
+    return "\n\n".join(text_parts)
