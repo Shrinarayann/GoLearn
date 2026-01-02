@@ -21,6 +21,12 @@ from ..config import settings
 # Import ADK comprehension orchestrator
 from study_agent.comprehension.orchestrator import comprehension_orchestrator
 
+# Import PDF image extraction service
+from .pdf_image_service import extract_images_from_pdf_bytes_as_base64
+
+# Import Firebase storage service for image uploads
+from .storage_service import upload_extracted_images_to_storage
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -175,16 +181,100 @@ async def run_comprehension(
     if isinstance(application_result, str):
         application_result = _parse_json_response(application_result, "Application")
     
+    # Keep original results for Firestore storage (avoid nested entity issues)
+    exploration_for_storage = exploration_result
+    engagement_for_storage = engagement_result
+    application_for_storage = application_result
+    
+    # Create a copy of engagement_result for API response with image annotations
+    import copy
+    engagement_for_response = copy.deepcopy(engagement_result) if isinstance(engagement_result, dict) else engagement_result
+    
+    # Extract images from PDF, upload to Firebase, and annotate engagement result
+    extracted_images = []
+    firebase_images = []
+    if pdf_bytes:
+        try:
+            # Step 1: Extract images as base64
+            image_extraction_result = extract_images_from_pdf_bytes_as_base64(pdf_bytes)
+            extracted_images = image_extraction_result.get("images", [])
+            logger.info(f"Extracted {len(extracted_images)} images from PDF")
+            
+            # Step 2: Upload images to Firebase Storage
+            if extracted_images:
+                firebase_images = await upload_extracted_images_to_storage(
+                    session_id=session_id,
+                    images=extracted_images
+                )
+                logger.info(f"Uploaded {len(firebase_images)} images to Firebase Storage")
+            
+            # Step 3: Annotate diagram_interpretations with Firebase URLs
+            if isinstance(engagement_for_response, dict) and "diagram_interpretations" in engagement_for_response:
+                diagram_interps = engagement_for_response["diagram_interpretations"]
+                if isinstance(diagram_interps, dict):
+                    annotated_diagram_interps = []
+                    for key, value in diagram_interps.items():
+                        # Check if key is a placeholder like [IMAGE_1], [IMAGE_2], etc.
+                        if key.startswith("[IMAGE_") and key.endswith("]"):
+                            try:
+                                # Extract image index (1-based)
+                                image_num = int(key[7:-1])  # Extract number from [IMAGE_N]
+                                image_idx = image_num - 1   # Convert to 0-based index
+                                
+                                # Find corresponding Firebase URL
+                                firebase_url = None
+                                if 0 <= image_idx < len(firebase_images):
+                                    firebase_url = firebase_images[image_idx].get("firebase_url")
+                                
+                                annotated_diagram_interps.append({
+                                    "image_index": image_idx,
+                                    "placeholder": key,
+                                    "description": value,
+                                    "has_image": firebase_url is not None,
+                                    "image_url": firebase_url  # Direct Firebase URL for frontend
+                                })
+                                logger.info(f"Annotated {key} with Firebase URL")
+                            except (ValueError, IndexError) as e:
+                                annotated_diagram_interps.append({
+                                    "image_index": None,
+                                    "placeholder": key,
+                                    "description": value,
+                                    "has_image": False,
+                                    "image_url": None
+                                })
+                                logger.warning(f"Failed to parse placeholder {key}: {e}")
+                        else:
+                            # Non-placeholder key (named diagram)
+                            annotated_diagram_interps.append({
+                                "image_index": None,
+                                "placeholder": key,
+                                "description": value,
+                                "has_image": False,
+                                "image_url": None
+                            })
+                    
+                    # Replace dict with array of annotated diagrams (for API response only)
+                    engagement_for_response["diagram_interpretations"] = annotated_diagram_interps
+        except Exception as e:
+            logger.error(f"Image extraction/upload failed: {e}")
+    
     logger.info(f"\n{'='*80}\nCOMPREHENSION COMPLETE (Session: {session_id})\n{'='*80}")
     logger.info(f"Exploration keys: {list(exploration_result.keys()) if isinstance(exploration_result, dict) else 'N/A'}")
     logger.info(f"Engagement keys: {list(engagement_result.keys()) if isinstance(engagement_result, dict) else 'N/A'}")
     logger.info(f"Application keys: {list(application_result.keys()) if isinstance(application_result, dict) else 'N/A'}")
+    logger.info(f"Images extracted: {len(extracted_images)}")
     logger.info(f"{'='*80}\n")
     
     result = {
+        # For API response (with image annotations)
         "exploration": exploration_result,
-        "engagement": engagement_result,
-        "application": application_result
+        "engagement": engagement_for_response,
+        "application": application_result,
+        "extracted_images": extracted_images,
+        # For Firestore storage (original format)
+        "exploration_for_storage": exploration_for_storage,
+        "engagement_for_storage": engagement_for_storage,
+        "application_for_storage": application_for_storage,
     }
     
     # Clean up uploaded file

@@ -51,6 +51,7 @@ class ComprehensionResponse(BaseModel):
     exploration: dict
     engagement: dict
     application: dict
+    extracted_images: Optional[List[dict]] = None  # Images from PDF for display
 
 
 # --- Routes ---
@@ -215,12 +216,12 @@ async def run_comprehension_endpoint(
             pdf_url=session.get("pdf_url")
         )
         
-        # Save results to session
+        # Save results to session (use _for_storage fields to avoid nested entity issues)
         await db.update_session(session_id, {
             "status": "ready",
-            "exploration_result": results["exploration"],
-            "engagement_result": results["engagement"],
-            "application_result": results["application"],
+            "exploration_result": results.get("exploration_for_storage", results["exploration"]),
+            "engagement_result": results.get("engagement_for_storage", results["engagement"]),
+            "application_result": results.get("application_for_storage", results["application"]),
         })
         
         return ComprehensionResponse(
@@ -229,6 +230,7 @@ async def run_comprehension_endpoint(
             exploration=results["exploration"],
             engagement=results["engagement"],
             application=results["application"],
+            extracted_images=results.get("extracted_images", []),
         )
         
     except Exception as e:

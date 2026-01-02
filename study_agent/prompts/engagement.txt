@@ -27,7 +27,7 @@ Provide your analysis as a comprehensive JSON object with these exact keys:
   "summary": "brief overview",
   "detailed_analysis": "comprehensive paragraph",
   "concept_explanations": {"topic1": "detailed explanation", "topic2": "..."},
-  "diagram_interpretations": {"diagram_name": "what it shows and why it matters"},
+  "diagram_interpretations": {"[IMAGE_1]": "description of first diagram", "[IMAGE_2]": "description of second diagram"},
   "definitions": {"term1": "definition", "term2": "..."},
   "formulas": {"formula_name": "formula with explanation"},
   "examples": ["concrete example 1", "example 2"],
@@ -36,4 +36,8 @@ Provide your analysis as a comprehensive JSON object with these exact keys:
   "key_insights": ["insight1", "insight2"]
 }
 
-IMPORTANT: Return ONLY the JSON object, no other text.
+IMPORTANT: 
+- Return ONLY the JSON object, no other text.
+- For diagram_interpretations, use numbered placeholders as keys: [IMAGE_1], [IMAGE_2], [IMAGE_3], etc.
+- Process diagrams sequentially (top to bottom, left to right) so [IMAGE_1] is the first diagram, [IMAGE_2] is the second, etc.
+- These placeholders will be replaced with actual images from the PDF.

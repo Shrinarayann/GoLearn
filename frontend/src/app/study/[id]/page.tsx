@@ -23,11 +23,20 @@ interface ExplorationResult {
     visual_elements?: string[];
 }
 
+// New interface for diagram interpretations with images
+interface DiagramInterpretation {
+    image_index: number | null;
+    placeholder: string;
+    description: string;
+    has_image: boolean;
+    image_url: string | null;
+}
+
 interface EngagementResult {
     summary?: string;
     detailed_analysis?: string;
     concept_explanations?: Record<string, string>;
-    diagram_interpretations?: Record<string, string>;
+    diagram_interpretations?: DiagramInterpretation[] | Record<string, string>;  // Support both formats
     definitions?: Record<string, string>;
     formulas?: Record<string, string>;
     examples?: string[];
@@ -215,10 +224,10 @@ export default function StudySessionPage() {
                                 onDrop={handleDrop}
                                 onClick={() => fileInputRef.current?.click()}
                                 className={`border-2 border-dashed rounded-lg p-6 sm:p-10 text-center cursor-pointer transition-all ${uploading
-                                        ? "border-[#4C9AFF] bg-[#DEEBFF]"
-                                        : uploadedFile
-                                            ? "border-[#36B37E] bg-[#E3FCEF]"
-                                            : "border-[#DFE1E6] hover:border-[#4C9AFF] hover:bg-[#F4F5F7]"
+                                    ? "border-[#4C9AFF] bg-[#DEEBFF]"
+                                    : uploadedFile
+                                        ? "border-[#36B37E] bg-[#E3FCEF]"
+                                        : "border-[#DFE1E6] hover:border-[#4C9AFF] hover:bg-[#F4F5F7]"
                                     }`}
                             >
                                 <input
@@ -307,8 +316,8 @@ export default function StudySessionPage() {
                                             key={tab.id}
                                             onClick={() => setActiveTab(tab.id)}
                                             className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id
-                                                    ? "border-[#0052CC] text-[#0052CC]"
-                                                    : "border-transparent text-[#6B778C] hover:text-[#172B4D] hover:border-[#DFE1E6]"
+                                                ? "border-[#0052CC] text-[#0052CC]"
+                                                : "border-transparent text-[#6B778C] hover:text-[#172B4D] hover:border-[#DFE1E6]"
                                                 }`}
                                         >
                                             <span className="w-5 h-5 rounded-full bg-current/10 text-xs flex items-center justify-center font-bold">{tab.num}</span>
@@ -343,7 +352,7 @@ export default function StudySessionPage() {
 
 function ExplorationTab({ data }: { data: ExplorationResult }) {
     console.log("ExplorationTab received:", data);
-    
+
     // Helper to safely render any value
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
@@ -356,7 +365,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
         }
         return String(value);
     };
-    
+
     // Check if parsing failed on backend
     if ((data as any).parse_error || (data as any).raw_response) {
         return (
@@ -368,7 +377,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
             </div>
         );
     }
-    
+
     return (
         <div className="space-y-6">
             {/* Summary */}
@@ -424,7 +433,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
 
 function EngagementTab({ data }: { data: EngagementResult }) {
     console.log("EngagementTab received:", data);
-    
+
     // Helper to safely render any value (string, object, array)
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
@@ -439,7 +448,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
         }
         return String(value);
     };
-    
+
     // Check if parsing failed on backend
     if ((data as any).parse_error || (data as any).raw_response) {
         return (
@@ -451,7 +460,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
             </div>
         );
     }
-    
+
     // Define standard fields with custom rendering
     const standardFields = new Set([
         'summary', 'detailed_analysis', 'concept_explanations', 'diagram_interpretations',
@@ -482,21 +491,47 @@ function EngagementTab({ data }: { data: EngagementResult }) {
             )}
 
             {/* Diagram Interpretations */}
-            {data.diagram_interpretations && Object.keys(data.diagram_interpretations).length > 0 && (
+            {data.diagram_interpretations && (Array.isArray(data.diagram_interpretations) ? data.diagram_interpretations.length > 0 : Object.keys(data.diagram_interpretations).length > 0) && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">Visual Elements & Diagrams</h3>
-                    <div className="space-y-4">
-                        {Object.entries(data.diagram_interpretations).map(([name, interpretation], i) => (
-                            <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
-                                <h4 className="font-semibold text-[#172B4D] mb-2 text-sm sm:text-base flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                    {name}
-                                </h4>
-                                <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{renderValue(interpretation)}</p>
-                            </div>
-                        ))}
+                    <div className="space-y-6">
+                        {Array.isArray(data.diagram_interpretations) ? (
+                            // New format: array with image_url
+                            data.diagram_interpretations.map((diagram, i) => (
+                                <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
+                                    <h4 className="font-semibold text-[#172B4D] mb-3 text-sm sm:text-base flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        Diagram {(diagram.image_index ?? i) + 1}
+                                    </h4>
+                                    {diagram.has_image && diagram.image_url && (
+                                        <div className="mb-4">
+                                            <img
+                                                src={diagram.image_url}
+                                                alt={`Diagram ${(diagram.image_index ?? i) + 1}`}
+                                                className="max-w-full h-auto rounded-lg shadow-md border border-gray-200"
+                                                style={{ maxHeight: '400px', objectFit: 'contain' }}
+                                            />
+                                        </div>
+                                    )}
+                                    <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{diagram.description}</p>
+                                </div>
+                            ))
+                        ) : (
+                            // Old format: object with key-value pairs
+                            Object.entries(data.diagram_interpretations).map(([name, interpretation], i) => (
+                                <div key={i} className="bg-[#E3FCEF] rounded-lg p-4 sm:p-5 border-l-4 border-[#36B37E]">
+                                    <h4 className="font-semibold text-[#172B4D] mb-2 text-sm sm:text-base flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        {name}
+                                    </h4>
+                                    <p className="text-[#172B4D] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{renderValue(interpretation)}</p>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
             )}
@@ -616,7 +651,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
             {/* Dynamic Additional Fields */}
             {additionalFields.length > 0 && additionalFields.map(([key, value]) => {
                 if (!value) return null;
-                
+
                 return (
                     <div key={key}>
                         <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-4 uppercase tracking-wide">
@@ -656,7 +691,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
 
 function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionId: string }) {
     console.log("ApplicationTab received:", data);
-    
+
     // Helper to safely render any value
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
@@ -669,7 +704,7 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
         }
         return String(value);
     };
-    
+
     // Check if parsing failed on backend
     if ((data as any).parse_error || (data as any).raw_response) {
         return (
@@ -681,7 +716,7 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
             </div>
         );
     }
-    
+
     return (
         <div className="space-y-6 sm:space-y-8">
             {/* Practical Applications */}
