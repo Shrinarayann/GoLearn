@@ -193,7 +193,7 @@ export default function StudySessionPage() {
                                 {session?.title || "Loading..."}
                             </h1>
                         </div>
-                        {/* Timer and Quiz button - visible on all tabs when results exist */}
+                        {/* Timer and Quiz/Exam buttons - visible on all tabs when results exist */}
                         {hasResults && (
                             <div className="flex items-center gap-3">
                                 <PomodoroTimer autoStart={true} />
@@ -202,6 +202,12 @@ export default function StudySessionPage() {
                                     className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
                                 >
                                     Start Quiz
+                                </Link>
+                                <Link
+                                    href={`/exam/create/${sessionId}`}
+                                    className="px-4 py-2 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center whitespace-nowrap"
+                                >
+                                    Create Exam
                                 </Link>
                             </div>
                         )}
