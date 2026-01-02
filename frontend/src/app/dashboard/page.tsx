@@ -254,7 +254,7 @@ export default function DashboardPage() {
                         <div className="sm:hidden space-y-3">
                             {sessions.map((session) => {
                                 const progress = progressData[session.session_id];
-                                const hasDue = progress && progress.due_for_review > 0;
+                                const hasDue = session.enable_spaced_repetition !== false && progress && progress.due_for_review > 0;
 
                                 return (
                                     <div key={session.session_id} className="bg-white rounded-lg border border-[#DFE1E6] p-4">
@@ -318,7 +318,7 @@ export default function DashboardPage() {
                                 <tbody>
                                     {sessions.map((session) => {
                                         const progress = progressData[session.session_id];
-                                        const hasDue = progress && progress.due_for_review > 0;
+                                        const hasDue = session.enable_spaced_repetition !== false && progress && progress.due_for_review > 0;
 
                                         return (
                                             <tr

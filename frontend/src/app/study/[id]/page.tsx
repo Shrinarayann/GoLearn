@@ -206,14 +206,12 @@ export default function StudySessionPage() {
                         {hasResults && (
                             <div className="flex items-center gap-3">
                                 <PomodoroTimer autoStart={true} />
-                                {session?.enable_spaced_repetition !== false && (
-                                    <Link
-                                        href={`/quiz/${sessionId}`}
-                                        className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
-                                    >
-                                        Start Quiz
-                                    </Link>
-                                )}
+                                <Link
+                                    href={`/quiz/${sessionId}`}
+                                    className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center whitespace-nowrap"
+                                >
+                                    Start Quiz
+                                </Link>
 
                                 {/* Exam button with dynamic states */}
                                 {examStatus.status === "generating" ? (
@@ -569,8 +567,8 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                                             {imageCaption.type}
                                         </span>
                                         <span className={`px-2 py-1 rounded text-xs font-medium ${imageCaption.relevance === 'high' ? 'bg-[#DE350B] text-white' :
-                                                imageCaption.relevance === 'medium' ? 'bg-[#FFAB00] text-white' :
-                                                    'bg-[#6B778C] text-white'
+                                            imageCaption.relevance === 'medium' ? 'bg-[#FFAB00] text-white' :
+                                                'bg-[#6B778C] text-white'
                                             }`}>
                                             {imageCaption.relevance}
                                         </span>

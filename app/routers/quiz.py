@@ -27,8 +27,8 @@ class QuestionResponse(BaseModel):
     question_type: str  # recall, understanding, application, analysis
     difficulty: str  # easy, medium, hard
     concept: str
-    stability: float = 1.0
-    fsrs_difficulty: float = 5.0
+    stability: Optional[float] = 1.0
+    fsrs_difficulty: Optional[float] = 5.0
     leitner_box: int = 1
 
 
@@ -42,9 +42,9 @@ class AnswerResponse(BaseModel):
     correct: bool
     correct_answer: str
     explanation: str
-    new_stability: float
-    new_difficulty: float
-    next_review_at: datetime
+    new_stability: Optional[float] = None
+    new_difficulty: Optional[float] = None
+    next_review_at: Optional[datetime] = None
     feedback: Optional[str] = None  # Re-explanation if incorrect
 
 
@@ -104,12 +104,8 @@ async def generate_quiz(
             detail="Session not found"
         )
     
-    # Check if spaced repetition is enabled for this session
-    if not session.get("enable_spaced_repetition", True):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Spaced repetition is disabled for this session"
-        )
+    # Store whether spaced repetition is enabled for this session
+    sr_enabled = session.get("enable_spaced_repetition", True)
     
     if session["status"] not in ["ready", "quizzing"]:
         raise HTTPException(
@@ -141,54 +137,75 @@ async def generate_quiz(
         session_id=session_id
     )
     
-    # Initialize Concepts for FSRS
-    # Extract unique concepts from the generated questions
-    unique_concepts = list(set([q.get("concept", "general") for q in questions]))
-    # Also add concepts from exploration if not present
-    key_topics = session.get("exploration_result", {}).get("key_topics", [])
-    for topic in key_topics:
-        if topic not in unique_concepts:
-            unique_concepts.append(topic)
-
+    # Initialize Concepts for FSRS (only if spaced repetition is enabled)
     now = datetime.utcnow()
-    for concept_name in unique_concepts:
-        # Check if concept already exists
-        existing_concept = await db.get_concept(session_id, concept_name)
-        if not existing_concept:
-            # Init FSRS stability/difficulty for "Good" (Rating 3)
-            s, d, _ = fsrs.init_card(3)
-            await db.create_concept({
-                "session_id": session_id,
-                "concept_name": concept_name,
-                "stability": s,
-                "difficulty": d,
-                "created_at": now,
-                "next_review_at": now,
-                "times_reviewed": 0,
-                "last_reviewed": None
-            })
+    if sr_enabled:
+        # Extract unique concepts from the generated questions
+        unique_concepts = list(set([q.get("concept", "general") for q in questions]))
+        # Also add concepts from exploration if not present
+        key_topics = session.get("exploration_result", {}).get("key_topics", [])
+        for topic in key_topics:
+            if topic not in unique_concepts:
+                unique_concepts.append(topic)
+
+        for concept_name in unique_concepts:
+            # Check if concept already exists
+            existing_concept = await db.get_concept(session_id, concept_name)
+            if not existing_concept:
+                # Init FSRS stability/difficulty for "Good" (Rating 3)
+                s, d, _ = fsrs.init_card(3)
+                await db.create_concept({
+                    "session_id": session_id,
+                    "concept_name": concept_name,
+                    "stability": s,
+                    "difficulty": d,
+                    "created_at": now,
+                    "next_review_at": now,
+                    "times_reviewed": 0,
+                    "last_reviewed": None
+                })
 
     # Save questions to Firestore
     saved_questions_resp = []
     for q in questions:
         concept_name = q.get("concept", "general")
-        concept_data = await db.get_concept(session_id, concept_name)
         
-        q_data = {
-            "session_id": session_id,
-            "question": q["question"],
-            "correct_answer": q["correct_answer"],
-            "question_type": q.get("type", "recall"),
-            "difficulty": q.get("difficulty", "medium"),
-            "concept": concept_name,
-            "explanation": q.get("explanation", ""),
-            "leitner_box": 1,
-            "created_at": now,
-            "next_review_at": now, # Immediately due
-            "times_reviewed": 0,
-            "stability": concept_data["stability"] if concept_data else 1.0,
-            "fsrs_difficulty": concept_data["difficulty"] if concept_data else 5.0
-        }
+        if sr_enabled:
+            # Get concept data for SR-enabled sessions
+            concept_data = await db.get_concept(session_id, concept_name)
+            q_data = {
+                "session_id": session_id,
+                "question": q["question"],
+                "correct_answer": q["correct_answer"],
+                "question_type": q.get("type", "recall"),
+                "difficulty": q.get("difficulty", "medium"),
+                "concept": concept_name,
+                "explanation": q.get("explanation", ""),
+                "leitner_box": 1,
+                "created_at": now,
+                "next_review_at": now,  # Immediately due
+                "times_reviewed": 0,
+                "stability": concept_data["stability"] if concept_data else 1.0,
+                "fsrs_difficulty": concept_data["difficulty"] if concept_data else 5.0
+            }
+        else:
+            # For non-SR sessions, save with null/default tracking values
+            q_data = {
+                "session_id": session_id,
+                "question": q["question"],
+                "correct_answer": q["correct_answer"],
+                "question_type": q.get("type", "recall"),
+                "difficulty": q.get("difficulty", "medium"),
+                "concept": concept_name,
+                "explanation": q.get("explanation", ""),
+                "leitner_box": 1,
+                "created_at": now,
+                "next_review_at": None,  # No review scheduling
+                "times_reviewed": 0,
+                "stability": None,  # No FSRS tracking
+                "fsrs_difficulty": None  # No FSRS tracking
+            }
+        
         question_id = await db.create_question(q_data)
         saved_questions_resp.append(QuestionResponse(
             question_id=question_id,
@@ -196,8 +213,8 @@ async def generate_quiz(
             question_type=q_data["question_type"],
             difficulty=q_data["difficulty"],
             concept=q_data["concept"],
-            stability=q_data["stability"],
-            fsrs_difficulty=q_data["fsrs_difficulty"],
+            stability=q_data.get("stability", 1.0),
+            fsrs_difficulty=q_data.get("fsrs_difficulty", 5.0),
             leitner_box=1,
         ))
     
@@ -333,6 +350,9 @@ async def submit_answer(
             detail="Not authorized"
         )
     
+    # Check if spaced repetition is enabled for this session
+    sr_enabled = session.get("enable_spaced_repetition", True)
+    
     # Evaluate answer
     result = await evaluate_answer(
         user_answer=request.answer,
@@ -349,55 +369,62 @@ async def submit_answer(
             detail="Failed to evaluate answer. Please try again."
         )
 
-    # Update Concept FSRS State
-    concept_name = question.get("concept", "general")
-    concept_data = await db.get_concept(question["session_id"], concept_name)
+    # Update Concept FSRS State (only if spaced repetition is enabled)
+    if sr_enabled:
+        concept_name = question.get("concept", "general")
+        concept_data = await db.get_concept(question["session_id"], concept_name)
 
-    
-    if concept_data:
-        # Calculate days since last review
-        last_reviewed = concept_data.get("last_reviewed")
-        if last_reviewed:
-            if isinstance(last_reviewed, str):
-                last_reviewed = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00')).replace(tzinfo=None)
+        if concept_data:
+            # Calculate days since last review
+            last_reviewed = concept_data.get("last_reviewed")
+            if last_reviewed:
+                if isinstance(last_reviewed, str):
+                    last_reviewed = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00')).replace(tzinfo=None)
+                else:
+                    last_reviewed = last_reviewed.replace(tzinfo=None)
+                delta = datetime.utcnow() - last_reviewed
+                days_since = max(0.1, delta.total_seconds() / 86400.0)
             else:
-                last_reviewed = last_reviewed.replace(tzinfo=None)
-            delta = datetime.utcnow() - last_reviewed
-            days_since = max(0.1, delta.total_seconds() / 86400.0)
-        else:
-            days_since = 0.0
+                days_since = 0.0
+                
+            rating = 3 if result["correct"] else 1  # 3=Good, 1=Again
             
-        rating = 3 if result["correct"] else 1  # 3=Good, 1=Again
-        
-        new_s, new_d, _ = fsrs.step(
-            stability=concept_data.get("stability", 1.0),
-            difficulty=concept_data.get("difficulty", 5.0),
-            rating=rating,
-            days_since_last_review=days_since
-        )
-        
-        next_review = datetime.utcnow() + timedelta(days=new_s)
-        
-        # Update concept record
-        await db.update_concept(concept_data["concept_id"], {
-            "stability": new_s,
-            "difficulty": new_d,
+            new_s, new_d, _ = fsrs.step(
+                stability=concept_data.get("stability", 1.0),
+                difficulty=concept_data.get("difficulty", 5.0),
+                rating=rating,
+                days_since_last_review=days_since
+            )
+            
+            next_review = datetime.utcnow() + timedelta(days=new_s)
+            
+            # Update concept record
+            await db.update_concept(concept_data["concept_id"], {
+                "stability": new_s,
+                "difficulty": new_d,
+                "last_reviewed": datetime.utcnow(),
+                "next_review_at": next_review,
+                "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+            })
+        else:
+            # Fallback if concept record missing
+            new_s, new_d = 1.0, 5.0
+            next_review = datetime.utcnow() + timedelta(days=1)
+
+        # Update question record with FSRS data
+        await db.update_question(question_id, {
             "last_reviewed": datetime.utcnow(),
-            "next_review_at": next_review,
-            "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+            "times_reviewed": question.get("times_reviewed", 0) + 1,
+            "stability": new_s,
+            "fsrs_difficulty": new_d
         })
     else:
-        # Fallback if concept record missing
-        new_s, new_d = 1.0, 5.0
-        next_review = datetime.utcnow() + timedelta(days=1)
-
-    # Update question record
-    await db.update_question(question_id, {
-        "last_reviewed": datetime.utcnow(),
-        "times_reviewed": question.get("times_reviewed", 0) + 1,
-        "stability": new_s,
-        "fsrs_difficulty": new_d
-    })
+        # For non-SR sessions, just increment times_reviewed without FSRS updates
+        new_s, new_d = None, None
+        next_review = None
+        await db.update_question(question_id, {
+            "times_reviewed": question.get("times_reviewed", 0) + 1
+        })
     
     return AnswerResponse(
         correct=result["correct"],
@@ -489,6 +516,13 @@ async def get_global_due_questions(
     """
     user_id = current_user["user_id"]
     
+    # Get all user sessions to filter by spaced repetition status
+    all_sessions = await db.get_user_sessions(user_id)
+    sr_enabled_session_ids = {
+        s["session_id"] for s in all_sessions 
+        if s.get("enable_spaced_repetition", True)
+    }
+    
     # Get all questions for the user
     all_questions = await db.get_user_questions(user_id)
     
@@ -497,6 +531,10 @@ async def get_global_due_questions(
     due_questions = []
     
     for q in all_questions:
+        # Skip questions from sessions with spaced repetition disabled
+        if q.get("session_id") not in sr_enabled_session_ids:
+            continue
+            
         review_date = q.get("next_review_at")
         is_due = False
         
