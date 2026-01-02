@@ -2,11 +2,17 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
+interface ConversationMessage {
+    role: "user" | "agent";
+    text: string;
+}
+
 interface VoiceChatPanelProps {
     sessionId: string;
     topic: string | null;
     token: string;
     onTranscript?: (text: string, role: "user" | "agent") => void;
+    initialHistory?: ConversationMessage[];
 }
 
 type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
@@ -16,6 +22,7 @@ export default function VoiceChatPanel({
     topic,
     token,
     onTranscript,
+    initialHistory = [],
 }: VoiceChatPanelProps) {
     const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
     const [isRecording, setIsRecording] = useState(false);
@@ -23,8 +30,16 @@ export default function VoiceChatPanel({
     const [error, setError] = useState<string | null>(null);
     const [audioLevel, setAudioLevel] = useState(0);
 
+    // Track conversation history for memory persistence
+    const conversationHistoryRef = useRef<ConversationMessage[]>([...initialHistory]);
+
+    // Track turn completion and audio state for proper icon timing
+    const turnCompleteReceivedRef = useRef(false);
+    const pendingAgentTextRef = useRef<string>("");
+
     const wsRef = useRef<WebSocket | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
+    const playbackContextRef = useRef<AudioContext | null>(null); // Separate context for playback
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const workletNodeRef = useRef<AudioWorkletNode | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
@@ -57,23 +72,52 @@ export default function VoiceChatPanel({
                     switch (message.type) {
                         case "connected":
                             setConnectionState("connected");
+                            // Send conversation history to maintain context
+                            if (conversationHistoryRef.current.length > 0) {
+                                ws.send(JSON.stringify({
+                                    type: "history",
+                                    messages: conversationHistoryRef.current
+                                }));
+                            }
+                            // Reset turn state
+                            turnCompleteReceivedRef.current = false;
+                            pendingAgentTextRef.current = "";
                             break;
 
                         case "audio":
                             // Queue audio for playback
                             const audioData = base64ToArrayBuffer(message.data);
                             audioQueueRef.current.push(audioData);
+                            setIsSpeaking(true); // Start speaking indicator
                             if (!isPlayingRef.current) {
                                 playNextAudio();
                             }
                             break;
 
                         case "transcript":
+                            // Accumulate agent transcript text
+                            pendingAgentTextRef.current += message.text;
                             onTranscript?.(message.text, "agent");
                             break;
 
+                        case "user_transcript":
+                            // User's speech was transcribed - add to history
+                            if (message.text?.trim()) {
+                                conversationHistoryRef.current.push({
+                                    role: "user",
+                                    text: message.text.trim()
+                                });
+                                onTranscript?.(message.text, "user");
+                            }
+                            break;
+
                         case "turn_complete":
-                            setIsSpeaking(false);
+                            // Mark turn as complete - but don't change icon yet
+                            turnCompleteReceivedRef.current = true;
+                            // If audio is done playing, finalize now
+                            if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
+                                finalizeTurn();
+                            }
                             break;
 
                         case "error":
@@ -222,21 +266,42 @@ export default function VoiceChatPanel({
         updateLevel();
     };
 
+    // Finalize the agent's turn - called when all audio is done AND turn_complete received
+    const finalizeTurn = () => {
+        setIsSpeaking(false);
+        // Add agent's complete response to conversation history
+        if (pendingAgentTextRef.current.trim()) {
+            conversationHistoryRef.current.push({
+                role: "agent",
+                text: pendingAgentTextRef.current.trim()
+            });
+        }
+        // Reset for next turn
+        pendingAgentTextRef.current = "";
+        turnCompleteReceivedRef.current = false;
+    };
+
     // Play audio from queue
     const playNextAudio = async () => {
         if (audioQueueRef.current.length === 0) {
             isPlayingRef.current = false;
+            // Check if turn was already marked complete - if so, finalize now
+            if (turnCompleteReceivedRef.current) {
+                finalizeTurn();
+            }
             return;
         }
 
         isPlayingRef.current = true;
-        setIsSpeaking(true);
 
         const audioData = audioQueueRef.current.shift()!;
 
         try {
-            // Create audio context for playback if needed
-            const audioContext = new AudioContext({ sampleRate: 24000 });
+            // Reuse or create playback audio context
+            if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
+                playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
+            }
+            const audioContext = playbackContextRef.current;
 
             // Convert PCM to AudioBuffer
             const int16Data = new Int16Array(audioData);
@@ -304,20 +369,20 @@ export default function VoiceChatPanel({
             {/* Connection Status */}
             <div className="mb-8 text-center">
                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${connectionState === "connected"
-                        ? "bg-[#E3FCEF] text-[#006644]"
-                        : connectionState === "connecting"
-                            ? "bg-[#FFFAE6] text-[#FF8B00]"
-                            : connectionState === "error"
-                                ? "bg-[#FFEBE6] text-[#DE350B]"
-                                : "bg-[#F4F5F7] text-[#6B778C]"
+                    ? "bg-[#E3FCEF] text-[#006644]"
+                    : connectionState === "connecting"
+                        ? "bg-[#FFFAE6] text-[#FF8B00]"
+                        : connectionState === "error"
+                            ? "bg-[#FFEBE6] text-[#DE350B]"
+                            : "bg-[#F4F5F7] text-[#6B778C]"
                     }`}>
                     <span className={`w-2 h-2 rounded-full ${connectionState === "connected"
-                            ? "bg-[#36B37E] animate-pulse"
-                            : connectionState === "connecting"
-                                ? "bg-[#FF8B00] animate-pulse"
-                                : connectionState === "error"
-                                    ? "bg-[#DE350B]"
-                                    : "bg-[#6B778C]"
+                        ? "bg-[#36B37E] animate-pulse"
+                        : connectionState === "connecting"
+                            ? "bg-[#FF8B00] animate-pulse"
+                            : connectionState === "error"
+                                ? "bg-[#DE350B]"
+                                : "bg-[#6B778C]"
                         }`} />
                     {connectionState === "connected" && "Voice chat active"}
                     {connectionState === "connecting" && "Connecting..."}
@@ -360,10 +425,10 @@ export default function VoiceChatPanel({
                     onClick={toggleRecording}
                     disabled={connectionState === "connecting"}
                     className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg ${isRecording
-                            ? "bg-[#DE350B] hover:bg-[#BF2600] scale-110"
-                            : isSpeaking
-                                ? "bg-[#6554C0] cursor-default"
-                                : "bg-[#0052CC] hover:bg-[#0747A6] hover:scale-105"
+                        ? "bg-[#DE350B] hover:bg-[#BF2600] scale-110"
+                        : isSpeaking
+                            ? "bg-[#6554C0] cursor-default"
+                            : "bg-[#0052CC] hover:bg-[#0747A6] hover:scale-105"
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                     {isRecording ? (

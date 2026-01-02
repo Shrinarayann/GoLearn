@@ -231,6 +231,7 @@ export default function FeynmanPage() {
                             sessionId={sessionId}
                             topic={selectedTopic}
                             token={token}
+                            initialHistory={messages}
                             onTranscript={(text, role) => {
                                 setMessages(prev => [...prev, { role, text }]);
                             }}
