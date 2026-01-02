@@ -1,11 +1,13 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useExam } from "@/contexts/ExamContext";
 import { useRouter, useParams } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
 import PomodoroTimer from "@/components/PomodoroTimer";
+import ExamUploadModal from "@/components/ExamUploadModal";
 
 interface SessionData {
     session_id: string;
@@ -72,6 +74,11 @@ export default function StudySessionPage() {
     const [uploadedFile, setUploadedFile] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<TabType>("exploration");
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [showExamModal, setShowExamModal] = useState(false);
+
+    // Exam generation context
+    const { getExamStatus, refreshExamStatus } = useExam();
+    const examStatus = getExamStatus(sessionId);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -82,8 +89,10 @@ export default function StudySessionPage() {
     useEffect(() => {
         if (token && sessionId) {
             loadSession();
+            // Refresh exam status on mount
+            refreshExamStatus(sessionId);
         }
-    }, [token, sessionId]);
+    }, [token, sessionId, refreshExamStatus]);
 
     const loadSession = async () => {
         if (!token) return;
@@ -203,12 +212,43 @@ export default function StudySessionPage() {
                                 >
                                     Start Quiz
                                 </Link>
-                                <Link
-                                    href={`/exam/create/${sessionId}`}
-                                    className="px-4 py-2 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center whitespace-nowrap"
-                                >
-                                    Create Exam
-                                </Link>
+
+                                {/* Exam button with dynamic states */}
+                                {examStatus.status === "generating" ? (
+                                    <button
+                                        disabled
+                                        className="px-4 py-2 bg-[#F4F5F7] text-[#6B778C] border border-[#DFE1E6] rounded font-medium text-sm text-center whitespace-nowrap flex items-center gap-2 cursor-not-allowed"
+                                    >
+                                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#0052CC] border-t-transparent" />
+                                        Generating...
+                                    </button>
+                                ) : examStatus.status === "ready" && examStatus.pdfUrl ? (
+                                    <a
+                                        href={examStatus.pdfUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-4 py-2 bg-[#36B37E] text-white rounded font-medium hover:bg-[#2E9E6E] transition-colors text-sm text-center whitespace-nowrap flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        Download Paper
+                                    </a>
+                                ) : examStatus.status === "error" ? (
+                                    <button
+                                        onClick={() => setShowExamModal(true)}
+                                        className="px-4 py-2 bg-[#FFEBE6] text-[#DE350B] border border-[#FF8F73] rounded font-medium hover:bg-[#FFD5CC] transition-colors text-sm text-center whitespace-nowrap"
+                                    >
+                                        Retry Exam
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowExamModal(true)}
+                                        className="px-4 py-2 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center whitespace-nowrap"
+                                    >
+                                        Create Exam
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -355,6 +395,13 @@ export default function StudySessionPage() {
                     </div>
                 )}
             </main>
+
+            {/* Exam Upload Modal */}
+            <ExamUploadModal
+                isOpen={showExamModal}
+                onClose={() => setShowExamModal(false)}
+                sessionId={sessionId}
+            />
         </div>
     );
 }
