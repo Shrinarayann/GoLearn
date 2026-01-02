@@ -17,10 +17,10 @@ import json
 from datetime import datetime
 
 from ..config import settings
-
+from typing import List
 # Import ADK comprehension orchestrator
 from study_agent.comprehension.orchestrator import comprehension_orchestrator
-
+from study_agent.feynman import feynman_agent
 # Import PDF image extraction service
 from .pdf_image_service import extract_images_from_pdf_bytes_as_base64, extract_text_from_pdf_bytes
 
@@ -57,6 +57,12 @@ _comprehension_runner = Runner(
     session_service=_session_service
 )
 
+# Create the ADK Runner for Feynman
+_feynman_runner = Runner(
+    agent=feynman_agent,
+    app_name="golearn",
+    session_service=_session_service
+)
 
 async def run_comprehension(
     content: str,
@@ -595,3 +601,199 @@ def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:
     
     logger.warning(f"{agent_name} JSON parse failed. Raw text: {original_text[:500]}...")
     return {"raw_response": original_text, "parse_error": True}
+
+
+async def run_feynman_chat(
+    user_message: str,
+    session_id: str,
+    study_context: dict,
+    topic: Optional[str] = None
+) -> str:
+    """
+    Run the Feynman Technique chat using ADK.
+    
+    Args:
+        user_message: The message from the user teaching the concept
+        session_id: Session ID (shared with study session)
+        study_context: Context from Pass 1 & 2 analysis
+        
+    Returns:
+        The response from the "Novice Student" agent
+    """
+    # Create or update session state with context if it's the first message
+    adk_session_id = f"feynman_{session_id}"
+    
+    try:
+        session = await _session_service.get_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id
+        )
+    except:
+        session = None
+
+    if not session:
+        # First message - include context in state
+        state = {"study_context": study_context}
+        if topic:
+            state["current_topic"] = topic
+        await _session_service.create_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id,
+            state=state,
+        )
+        logger.info(f"Created Feynman ADK session: {adk_session_id}")
+    elif topic:
+        # Update current topic in session state
+        session.state["current_topic"] = topic
+    
+    # Create the message content
+    message = types.Content(
+        role="user",
+        parts=[types.Part(text=user_message)]
+    )
+    
+    # Run the ADK agent
+    final_response_text = ""
+    try:
+        async for event in _feynman_runner.run_async(
+            user_id="golearn",
+            session_id=adk_session_id,
+            new_message=message
+        ):
+            # The LlmAgent should emit events with content
+            if hasattr(event, 'content') and event.content:
+                if isinstance(event.content, types.Content):
+                    final_response_text = "".join(p.text for p in event.content.parts if p.text)
+                else:
+                    final_response_text = str(event.content)
+    except Exception as e:
+        logger.error(f"Feynman ADK Runner error: {e}")
+        raise
+    
+    return final_response_text
+
+
+async def generate_feynman_greeting(
+    session_id: str,
+    study_context: dict,
+    topic: Optional[str] = None
+) -> str:
+    """
+    Generate an initial, contextual greeting from the Feynman student.
+    
+    Args:
+        session_id: Session ID
+        study_context: Context from Pass 1 & 2 analysis
+        
+    Returns:
+        A greeting like "Hi! I'm trying to learn about [Topic]. Can you explain [Concept] to me?"
+    """
+    adk_session_id = f"feynman_{session_id}"
+    
+    # Initialize session if needed
+    try:
+        session = await _session_service.get_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id
+        )
+    except:
+        session = None
+
+    if not session:
+        await _session_service.create_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id,
+            state={"study_context": study_context},
+        )
+    
+    # Send a prompt to the agent to generate a greeting
+    if topic:
+        prompt = f"Introduce yourself as a curious student who wants to learn about '{topic}'. Ask me to explain it simply to you as if I'm starting from scratch. Be enthusiastic!"
+    else:
+        prompt = "Introduce yourself as a curious student who wants to learn about this topic. Based on the study_context, pick one specific concept you find most interesting or confusing and ask me to explain it simply to you."
+    
+    message = types.Content(
+        role="user",
+        parts=[types.Part(text=prompt)]
+    )
+    
+    final_response_text = ""
+    try:
+        async for event in _feynman_runner.run_async(
+            user_id="golearn",
+            session_id=adk_session_id,
+            new_message=message
+        ):
+            if hasattr(event, 'content') and event.content:
+                if isinstance(event.content, types.Content):
+                    final_response_text = "".join(p.text for p in event.content.parts if p.text)
+                else:
+                    final_response_text = str(event.content)
+    except Exception as e:
+        logger.error(f"Feynman Greeting error: {e}")
+        return "Hi! I'm really curious about what you're studying. Could you explain it to me?"
+    
+    return final_response_text
+
+
+async def evaluate_mastery(
+    transcript: List[dict],
+    topic: str,
+    study_context: dict
+) -> dict:
+    """
+    Use an LLM to evaluate the user's mastery of a topic based on a chat transcript.
+    
+    Returns:
+        {"score": int, "feedback": str}
+    """
+    # Build a string from the transcript
+    transcript_str = ""
+    for msg in transcript:
+        role = "User (Teacher)" if msg["role"] == "user" else "AI (Student)"
+        transcript_str += f"{role}: {msg['content']}\n"
+    
+    prompt = f"""
+    You are an expert educational evaluator. Your task is to assess a user's mastery of the topic: "{topic}".
+    
+    The user is using the Feynman Technique (explaining a concept to a novice student).
+    Below is the interaction transcript between the user (Teacher) and an AI (Novice Student).
+    
+    Study Context for reference:
+    {json.dumps(study_context, indent=2)}
+    
+    Conversation Transcript:
+    {transcript_str}
+    
+    Based on the clarity, accuracy, and simplicity of the user's explanations, provide:
+    1. A mastery score from 0 to 100.
+    2. Brief, constructive feedback on what they explained well and what gaps remain.
+    
+    Return ONLY a JSON object:
+    {{
+        "score": 85,
+        "feedback": "Your explanation of [Concept] was excellent and used great analogies. However, you seemed a bit vague on [Sub-topic]..."
+    }}
+    """
+    
+    try:
+        response = llm.generate_content(prompt)
+        result = _parse_json_response(response.text, "mastery_evaluator")
+        
+        # Ensure score is an int
+        if "score" in result:
+            try:
+                result["score"] = int(result["score"])
+            except:
+                result["score"] = 0
+        else:
+            result["score"] = 0
+            
+        return result
+    except Exception as e:
+        logger.error(f"Mastery evaluation failed: {e}")
+        return {"score": 0, "feedback": "Evaluation failed. Try teaching more!"}

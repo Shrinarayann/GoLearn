@@ -210,6 +210,7 @@ class ApiClient {
             new_stability: number;
             new_difficulty: number;
             next_review_at: string;
+            new_leitner_box?: number;
             feedback?: string;
         }>(`/quiz/questions/${questionId}/answer`, {
             method: "POST",
@@ -278,6 +279,66 @@ class ApiClient {
         }>("/dashboard/data", { token });
     }
 
+    // Feynman Methods
+    async sendFeynmanMessage(token: string, sessionId: string, message: string, topic?: string) {
+        let endpoint = `/feynman/sessions/${sessionId}/chat`;
+        if (topic) {
+            const params = new URLSearchParams();
+            params.append("topic", topic);
+            endpoint += `?${params.toString()}`;
+        }
+
+        return this.request<{
+            response: string;
+        }>(endpoint, {
+            method: "POST",
+            token,
+            body: { message },
+        });
+    }
+
+    async getFeynmanGreeting(token: string, sessionId: string, topic?: string) {
+        let endpoint = `/feynman/sessions/${sessionId}/greeting`;
+        if (topic) {
+            const params = new URLSearchParams();
+            params.append("topic", topic);
+            endpoint += `?${params.toString()}`;
+        }
+
+        return this.request<{
+            response: string;
+        }>(endpoint, { token });
+    }
+
+    async getFeynmanTopics(token: string, sessionId: string) {
+        return this.request<{
+            topics: Array<{
+                name: string;
+                mastery?: {
+                    score: number;
+                    updated_at?: string;
+                };
+            }>;
+        }>(`/feynman/sessions/${sessionId}/topics`, { token });
+    }
+
+    async evaluateFeynmanMastery(token: string, sessionId: string, topic: string, transcript: Array<{ role: string; content: string }>) {
+        return this.request<{
+            score: number;
+            feedback: string;
+        }>(`/feynman/sessions/${sessionId}/evaluate`, {
+            method: "POST",
+            token,
+            body: { topic, transcript },
+        });
+    }
+
+    // Voice Chat
+    getVoiceWebSocketUrl(sessionId: string, token: string): string {
+        const wsBase = this.baseUrl.replace('http', 'ws');
+        return `${wsBase}/ws/feynman/${sessionId}/voice?token=${token}`;
+    }
+
     // Exam Generation
     async startExamGeneration(token: string, sessionId: string, file: File) {
         const formData = new FormData();
@@ -322,14 +383,6 @@ class ApiClient {
             token,
         });
     }
-
-    // Voice Chat
-    getVoiceWebSocketUrl(sessionId: string, token: string): string {
-        const wsBase = this.baseUrl.replace('http', 'ws');
-        return `${wsBase}/ws/feynman/${sessionId}/voice?token=${token}`;
-    }
 }
 
 export const api = new ApiClient(API_BASE_URL);
-
-
