@@ -79,7 +79,6 @@ export default function StudySessionPage() {
         if (!token) return;
         try {
             const data = await api.getSession(token, sessionId);
-            console.log("Loaded session data:", JSON.stringify(data, null, 2));
             setSession(data as SessionData);
             if (data.pdf_filename) {
                 setUploadedFile(data.pdf_filename);
@@ -130,7 +129,6 @@ export default function StudySessionPage() {
 
         try {
             const result = await api.runComprehension(token, sessionId, content || undefined);
-            console.log("Comprehension result:", JSON.stringify(result, null, 2));
             setSession((prev) =>
                 prev
                     ? {
@@ -344,9 +342,9 @@ export default function StudySessionPage() {
 // === Tab Components ===
 
 function ExplorationTab({ data }: { data: ExplorationResult }) {
-    console.log("ExplorationTab received data:", JSON.stringify(data, null, 2));
+    console.log("ExplorationTab received:", data);
     
-    // Helper to safely render any value (string, object, array)
+    // Helper to safely render any value
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
         if (typeof value === 'number') return String(value);
@@ -354,12 +352,23 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
         if (typeof value === 'object') {
             if ('explanation' in value) return String(value.explanation);
             if ('text' in value) return String(value.text);
-            if ('content' in value) return String(value.content);
             return JSON.stringify(value, null, 2);
         }
         return String(value);
     };
-
+    
+    // Check if parsing failed on backend
+    if ((data as any).parse_error || (data as any).raw_response) {
+        return (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h3 className="font-semibold text-yellow-800 mb-2">Raw Response (Parsing Issue)</h3>
+                <pre className="text-sm text-yellow-700 whitespace-pre-wrap overflow-auto max-h-96">
+                    {(data as any).raw_response || JSON.stringify(data, null, 2)}
+                </pre>
+            </div>
+        );
+    }
+    
     return (
         <div className="space-y-6">
             {/* Summary */}
@@ -374,7 +383,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
             {data.structural_overview && (
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Document Structure</h3>
-                    <p className="text-[#172B4D] leading-relaxed text-sm sm:text-base whitespace-pre-wrap">{renderValue(data.structural_overview)}</p>
+                    <p className="text-[#172B4D] leading-relaxed text-sm sm:text-base">{data.structural_overview}</p>
                 </div>
             )}
 
@@ -388,7 +397,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
                                 key={i}
                                 className="px-3 py-1.5 bg-[#F4F5F7] text-[#172B4D] rounded-full text-xs sm:text-sm font-medium"
                             >
-                                {renderValue(topic)}
+                                {topic}
                             </span>
                         ))}
                     </div>
@@ -403,7 +412,7 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
                         {data.visual_elements.map((elem, i) => (
                             <li key={i} className="flex items-start gap-2 text-[#172B4D] text-sm">
                                 <span className="text-[#6B778C]">•</span>
-                                {renderValue(elem)}
+                                {elem}
                             </li>
                         ))}
                     </ul>
@@ -414,7 +423,34 @@ function ExplorationTab({ data }: { data: ExplorationResult }) {
 }
 
 function EngagementTab({ data }: { data: EngagementResult }) {
-    console.log("EngagementTab received data:", JSON.stringify(data, null, 2));
+    console.log("EngagementTab received:", data);
+    
+    // Helper to safely render any value (string, object, array)
+    const renderValue = (value: any): string => {
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') return String(value);
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') {
+            if ('explanation' in value) return String(value.explanation);
+            if ('formula' in value) return String(value.formula);
+            if ('text' in value) return String(value.text);
+            if ('content' in value) return String(value.content);
+            return JSON.stringify(value, null, 2);
+        }
+        return String(value);
+    };
+    
+    // Check if parsing failed on backend
+    if ((data as any).parse_error || (data as any).raw_response) {
+        return (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h3 className="font-semibold text-yellow-800 mb-2">Raw Response (Parsing Issue)</h3>
+                <pre className="text-sm text-yellow-700 whitespace-pre-wrap overflow-auto max-h-96">
+                    {(data as any).raw_response || JSON.stringify(data, null, 2)}
+                </pre>
+            </div>
+        );
+    }
     
     // Define standard fields with custom rendering
     const standardFields = new Set([
@@ -425,30 +461,13 @@ function EngagementTab({ data }: { data: EngagementResult }) {
     // Find any additional fields the agent returned
     const additionalFields = Object.entries(data).filter(([key]) => !standardFields.has(key));
 
-    // Helper to safely render any value (string, object, array)
-    const renderValue = (value: any): string => {
-        if (typeof value === 'string') return value;
-        if (typeof value === 'number') return String(value);
-        if (value === null || value === undefined) return '';
-        if (typeof value === 'object') {
-            // If it has common text fields, extract them
-            if ('explanation' in value) return String(value.explanation);
-            if ('formula' in value) return String(value.formula);
-            if ('text' in value) return String(value.text);
-            if ('content' in value) return String(value.content);
-            // Otherwise stringify
-            return JSON.stringify(value, null, 2);
-        }
-        return String(value);
-    };
-
     return (
         <div className="space-y-6 sm:space-y-8">
             {/* Summary */}
             {data.summary && (
                 <div className="bg-[#DEEBFF] rounded-lg p-4 sm:p-5">
                     <h3 className="text-xs sm:text-sm font-semibold text-[#0747A6] mb-2 uppercase tracking-wide">Engagement Summary</h3>
-                    <p className="text-[#172B4D] text-sm sm:text-base leading-relaxed whitespace-pre-wrap">{data.summary}</p>
+                    <p className="text-[#172B4D] text-sm sm:text-base leading-relaxed whitespace-pre-wrap">{renderValue(data.summary)}</p>
                 </div>
             )}
 
@@ -457,7 +476,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                 <div>
                     <h3 className="text-xs sm:text-sm font-semibold text-[#6B778C] mb-3 uppercase tracking-wide">Detailed Analysis</h3>
                     <div className="bg-[#F4F5F7] rounded-lg p-4 sm:p-5">
-                        <p className="text-[#172B4D] text-sm leading-relaxed whitespace-pre-wrap">{data.detailed_analysis}</p>
+                        <p className="text-[#172B4D] text-sm leading-relaxed whitespace-pre-wrap">{renderValue(data.detailed_analysis)}</p>
                     </div>
                 </div>
             )}
@@ -612,7 +631,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                                 {value.map((item, i) => (
                                     <div key={i} className="flex items-start gap-2 bg-[#F4F5F7] rounded p-3">
                                         <span className="text-[#6B778C]">•</span>
-                                        <p className="text-[#172B4D] text-sm">{String(item)}</p>
+                                        <p className="text-[#172B4D] text-sm">{renderValue(item)}</p>
                                     </div>
                                 ))}
                             </div>
@@ -621,7 +640,7 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                                 {Object.entries(value).map(([k, v], i) => (
                                     <div key={i} className="bg-[#F4F5F7] rounded p-3">
                                         <span className="font-semibold text-[#172B4D]">{k}:</span>
-                                        <span className="text-[#42526E] ml-2">{String(v)}</span>
+                                        <span className="text-[#42526E] ml-2">{renderValue(v)}</span>
                                     </div>
                                 ))}
                             </div>
@@ -636,9 +655,9 @@ function EngagementTab({ data }: { data: EngagementResult }) {
 }
 
 function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionId: string }) {
-    console.log("ApplicationTab received data:", JSON.stringify(data, null, 2));
+    console.log("ApplicationTab received:", data);
     
-    // Helper to safely render any value (string, object, array)
+    // Helper to safely render any value
     const renderValue = (value: any): string => {
         if (typeof value === 'string') return value;
         if (typeof value === 'number') return String(value);
@@ -646,12 +665,23 @@ function ApplicationTab({ data, sessionId }: { data: ApplicationResult; sessionI
         if (typeof value === 'object') {
             if ('explanation' in value) return String(value.explanation);
             if ('text' in value) return String(value.text);
-            if ('content' in value) return String(value.content);
             return JSON.stringify(value, null, 2);
         }
         return String(value);
     };
-
+    
+    // Check if parsing failed on backend
+    if ((data as any).parse_error || (data as any).raw_response) {
+        return (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h3 className="font-semibold text-yellow-800 mb-2">Raw Response (Parsing Issue)</h3>
+                <pre className="text-sm text-yellow-700 whitespace-pre-wrap overflow-auto max-h-96">
+                    {(data as any).raw_response || JSON.stringify(data, null, 2)}
+                </pre>
+            </div>
+        );
+    }
+    
     return (
         <div className="space-y-6 sm:space-y-8">
             {/* Practical Applications */}

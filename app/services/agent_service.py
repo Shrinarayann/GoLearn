@@ -122,7 +122,7 @@ async def run_comprehension(
     logger.info(f"\n{'-'*80}\nPASS 1: EXPLORATION AGENT\n{'-'*80}")
     exploration_response = model.generate_content(content_parts + [EXPLORATION_PROMPT])
     logger.info(f"Raw Response:\n{exploration_response.text}\n")
-    exploration_result = _parse_json_response(exploration_response.text)
+    exploration_result = _parse_json_response(exploration_response.text, "Exploration")
     
     # PASS 2: ENGAGEMENT (with context from exploration)
     logger.info(f"\n{'-'*80}\nPASS 2: ENGAGEMENT AGENT\n{'-'*80}")
@@ -132,7 +132,7 @@ async def run_comprehension(
     )
     engagement_response = model.generate_content(content_parts + [engagement_prompt_with_context])
     logger.info(f"Raw Response:\n{engagement_response.text}\n")
-    engagement_result = _parse_json_response(engagement_response.text)
+    engagement_result = _parse_json_response(engagement_response.text, "Engagement")
     
     # PASS 3: APPLICATION (with context from previous passes)
     logger.info(f"\n{'-'*80}\nPASS 3: APPLICATION AGENT\n{'-'*80}")
@@ -145,7 +145,7 @@ async def run_comprehension(
     )
     application_response = model.generate_content(content_parts + [application_prompt_with_context])
     logger.info(f"Raw Response:\n{application_response.text}\n")
-    application_result = _parse_json_response(application_response.text)
+    application_result = _parse_json_response(application_response.text, "Application")
     
     # Log summary
     logger.info(f"\n{'='*80}\nCOMPREHENSION COMPLETE (Session: {session_id})\n{'='*80}")
@@ -295,19 +295,77 @@ Be supportive and use simple terms. Max 3 sentences."""
     return result
 
 
-def _parse_json_response(text: str) -> dict:
+def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:
     """Parse JSON from LLM response, handling markdown code blocks."""
     import json
+    import re
     
+    original_text = text
     text = text.strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
     
+    # First, try to extract JSON from markdown code blocks anywhere in the text
+    # Match ```json ... ``` or ``` ... ```
+    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if code_block_match:
+        text = code_block_match.group(1).strip()
+    else:
+        # Fallback: Remove code block markers if they exist at boundaries
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    
+    # Try direct JSON parse first
     try:
-        return json.loads(text.strip())
+        return json.loads(text)
     except json.JSONDecodeError:
-        return {"raw_response": text}
+        pass
+    
+    # Try to extract the outermost JSON object using bracket matching
+    def extract_json_object(s: str) -> str | None:
+        start = s.find('{')
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i, c in enumerate(s[start:], start):
+            if escape:
+                escape = False
+                continue
+            if c == '\\' and in_string:
+                escape = True
+                continue
+            if c == '"' and not escape:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return s[start:i+1]
+        return None
+    
+    json_str = extract_json_object(text)
+    if json_str:
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+    
+    # Try to find JSON array
+    array_match = re.search(r'\[[\s\S]*?\]', text)
+    if array_match:
+        try:
+            return {"items": json.loads(array_match.group())}
+        except json.JSONDecodeError:
+            pass
+    
+    logger.warning(f"{agent_name} JSON parse failed. Raw text: {original_text[:500]}...")
+    return {"raw_response": original_text, "parse_error": True}
