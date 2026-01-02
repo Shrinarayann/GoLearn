@@ -244,7 +244,15 @@ async def get_questions(
     
     questions = await db.get_session_questions(session_id, due_only=False)
     
+    # Check if spaced repetition is enabled for this session
+    sr_enabled = session.get("enable_spaced_repetition", True)
+    
     if due_only:
+        # If SR is disabled, review mode should return empty
+        # (SR-disabled sessions don't have scheduled reviews)
+        if not sr_enabled:
+            return []
+        
         # Filter for due questions (consistent with dashboard logic)
         now = datetime.utcnow() + timedelta(seconds=5)
         
@@ -346,50 +354,70 @@ async def submit_answer(
     if sr_enabled:
         concept_name = question.get("concept", "general")
         concept_data = await db.get_concept(question["session_id"], concept_name)
+        current_box = question.get("leitner_box", 1)
 
-        if concept_data:
-            # Calculate days since last review
-            last_reviewed = concept_data.get("last_reviewed")
-            if last_reviewed:
-                if isinstance(last_reviewed, str):
-                    last_reviewed = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00')).replace(tzinfo=None)
+        if result["correct"]:
+            # Correct: promote to next box, schedule for future review
+            new_box = min(current_box + 1, 5)
+            
+            if concept_data:
+                # Calculate days since last review
+                last_reviewed = concept_data.get("last_reviewed")
+                if last_reviewed:
+                    if isinstance(last_reviewed, str):
+                        last_reviewed = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00')).replace(tzinfo=None)
+                    else:
+                        last_reviewed = last_reviewed.replace(tzinfo=None)
+                    delta = datetime.utcnow() - last_reviewed
+                    days_since = max(0.1, delta.total_seconds() / 86400.0)
                 else:
-                    last_reviewed = last_reviewed.replace(tzinfo=None)
-                delta = datetime.utcnow() - last_reviewed
-                days_since = max(0.1, delta.total_seconds() / 86400.0)
-            else:
-                days_since = 0.0
+                    days_since = 0.0
+                    
+                new_s, new_d, _ = fsrs.step(
+                    stability=concept_data.get("stability", 1.0),
+                    difficulty=concept_data.get("difficulty", 5.0),
+                    rating=3,  # Good rating for correct
+                    days_since_last_review=days_since
+                )
                 
-            rating = 3 if result["correct"] else 1  # 3=Good, 1=Again
-            
-            new_s, new_d, _ = fsrs.step(
-                stability=concept_data.get("stability", 1.0),
-                difficulty=concept_data.get("difficulty", 5.0),
-                rating=rating,
-                days_since_last_review=days_since
-            )
-            
-            next_review = datetime.utcnow() + timedelta(days=new_s)
-            
-            # Update concept record
-            await db.update_concept(concept_data["concept_id"], {
-                "stability": new_s,
-                "difficulty": new_d,
-                "last_reviewed": datetime.utcnow(),
-                "next_review_at": next_review,
-                "times_reviewed": concept_data.get("times_reviewed", 0) + 1
-            })
+                next_review = datetime.utcnow() + timedelta(days=new_s)
+                
+                # Update concept record
+                await db.update_concept(concept_data["concept_id"], {
+                    "stability": new_s,
+                    "difficulty": new_d,
+                    "last_reviewed": datetime.utcnow(),
+                    "next_review_at": next_review,
+                    "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+                })
+            else:
+                # Fallback if concept record missing
+                new_s, new_d = 1.0, 5.0
+                next_review = datetime.utcnow() + timedelta(days=1)
         else:
-            # Fallback if concept record missing
-            new_s, new_d = 1.0, 5.0
-            next_review = datetime.utcnow() + timedelta(days=1)
+            # Incorrect: demote to Box 1, IMMEDIATELY due for review
+            new_box = 1
+            new_s = 1.0  # Reset stability
+            new_d = question.get("fsrs_difficulty") or 5.0  # Keep difficulty
+            next_review = datetime.utcnow()  # Immediately due!
+            
+            if concept_data:
+                # Update concept with reset stability
+                await db.update_concept(concept_data["concept_id"], {
+                    "stability": new_s,
+                    "last_reviewed": datetime.utcnow(),
+                    "next_review_at": next_review,
+                    "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+                })
 
-        # Update question record with FSRS data
+        # Update question record with FSRS data AND next_review_at
         await db.update_question(question_id, {
             "last_reviewed": datetime.utcnow(),
             "times_reviewed": question.get("times_reviewed", 0) + 1,
             "stability": new_s,
-            "fsrs_difficulty": new_d
+            "fsrs_difficulty": new_d,
+            "leitner_box": new_box,
+            "next_review_at": next_review
         })
     else:
         # For non-SR sessions, just increment times_reviewed without FSRS updates
