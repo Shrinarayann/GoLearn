@@ -13,6 +13,8 @@ interface Question {
     difficulty: string;
     concept: string;
     leitner_box: number;
+    session_id?: string;
+    session_title?: string;
 }
 
 interface AnswerResult {
@@ -29,6 +31,7 @@ export default function QuizPage() {
     const params = useParams();
     const searchParams = useSearchParams();
     const sessionId = params.id as string;
+    const isGlobalMode = sessionId === "global" && searchParams.get("mode") === "global";
     const isReviewMode = searchParams.get("mode") === "review";
 
     const [questions, setQuestions] = useState<Question[]>([]);
@@ -57,16 +60,23 @@ export default function QuizPage() {
         if (questions.length > 0) return;
 
         try {
-            // In review mode, fetch only due questions
-            const data = await api.getQuestions(token, sessionId, isReviewMode);
-            if (data.length > 0) {
+            if (isGlobalMode) {
+                // Global review mode - fetch all due questions across sessions
+                const data = await api.getGlobalDueQuestions(token);
                 setQuestions(data);
-            } else if (!isReviewMode) {
-                // Only generate new quiz if not in review mode
-                generateQuiz();
+            } else {
+                // Session-specific mode
+                // In review mode, fetch only due questions
+                const data = await api.getQuestions(token, sessionId, isReviewMode);
+                if (data.length > 0) {
+                    setQuestions(data);
+                } else if (!isReviewMode) {
+                    // Only generate new quiz if not in review mode
+                    generateQuiz();
+                }
             }
         } catch (error) {
-            if (!isReviewMode) {
+            if (!isReviewMode && !isGlobalMode) {
                 generateQuiz();
             }
         }
@@ -150,12 +160,20 @@ export default function QuizPage() {
             <header className="bg-white border-b border-[#DFE1E6] sticky top-0 z-10">
                 <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
                     <div className="flex items-center justify-between gap-4">
-                        <Link href={`/study/${sessionId}`} className="text-sm text-[#6B778C] hover:text-[#172B4D] transition-colors flex-shrink-0">
-                            <span className="hidden sm:inline">← Back to Study</span>
+                        <Link
+                            href={isGlobalMode ? "/dashboard" : `/study/${sessionId}`}
+                            className="text-sm text-[#6B778C] hover:text-[#172B4D] transition-colors flex-shrink-0"
+                        >
+                            <span className="hidden sm:inline">{isGlobalMode ? "← Back to Dashboard" : "← Back to Study"}</span>
                             <span className="sm:hidden">← Back</span>
                         </Link>
                         <div className="flex items-center gap-2 sm:gap-4">
-                            {isReviewMode && (
+                            {isGlobalMode && (
+                                <span className="px-2 py-1 bg-gradient-to-r from-[#0052CC] to-[#6554C0] text-white rounded text-xs font-medium">
+                                    Global Review
+                                </span>
+                            )}
+                            {isReviewMode && !isGlobalMode && (
                                 <span className="px-2 py-1 bg-[#FF8B00] text-white rounded text-xs font-medium">
                                     Review Mode
                                 </span>
@@ -215,6 +233,17 @@ export default function QuizPage() {
                     <div className="bg-white rounded-lg border border-[#DFE1E6]">
                         {/* Question */}
                         <div className="p-4 sm:p-6 border-b border-[#DFE1E6]">
+                            {/* Session context for global mode */}
+                            {isGlobalMode && currentQuestion.session_title && (
+                                <div className="mb-3">
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F4F5F7] text-[#6B778C] rounded text-xs font-medium">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                        </svg>
+                                        From: {currentQuestion.session_title}
+                                    </span>
+                                </div>
+                            )}
                             <div className="flex flex-wrap items-center gap-2 mb-3 sm:mb-4">
                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(currentQuestion.question_type)}`}>
                                     {currentQuestion.question_type}

@@ -304,8 +304,8 @@ def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:
     text = text.strip()
     
     # First, try to extract JSON from markdown code blocks anywhere in the text
-    # Match ```json ... ``` or ``` ... ```
-    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    # Match ```json ... ``` or ``` ... ``` (with optional closing backticks)
+    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', text)
     if code_block_match:
         text = code_block_match.group(1).strip()
     else:

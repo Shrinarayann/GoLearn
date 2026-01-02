@@ -153,6 +153,44 @@ class FirestoreService:
             questions.append(data)
         return questions
     
+    async def get_user_questions(
+        self, 
+        user_id: str, 
+        due_only: bool = False
+    ) -> List[dict]:
+        """
+        Get all questions for a user across all their sessions.
+        Returns questions with session metadata included.
+        """
+        # First, get all user sessions to build a session_id -> title map
+        sessions = await self.get_user_sessions(user_id)
+        session_map = {s["session_id"]: s.get("title", "Untitled") for s in sessions}
+        session_ids = list(session_map.keys())
+        
+        if not session_ids:
+            return []
+        
+        # Firestore has a limit of 10 items for 'in' queries, so we batch if needed
+        all_questions = []
+        batch_size = 10
+        
+        for i in range(0, len(session_ids), batch_size):
+            batch_session_ids = session_ids[i:i + batch_size]
+            query = (
+                self.db.collection("quiz_questions")
+                .where("session_id", "in", batch_session_ids)
+            )
+            
+            docs = query.stream()
+            for doc in docs:
+                data = doc.to_dict()
+                data["question_id"] = doc.id
+                # Add session title for context
+                data["session_title"] = session_map.get(data["session_id"], "Unknown")
+                all_questions.append(data)
+        
+        return all_questions
+    
     async def update_question(self, question_id: str, data: dict) -> None:
         """Update a quiz question."""
         self.db.collection("quiz_questions").document(question_id).update(data)

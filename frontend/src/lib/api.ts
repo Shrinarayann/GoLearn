@@ -188,6 +188,57 @@ class ApiClient {
             due_for_review: number;
         }>(`/quiz/sessions/${sessionId}/progress`, { token });
     }
+
+    async getGlobalDueQuestions(token: string) {
+        return this.request<Array<{
+            question_id: string;
+            question: string;
+            question_type: string;
+            difficulty: string;
+            concept: string;
+            leitner_box: number;
+            session_id: string;
+            session_title: string;
+        }>>("/quiz/questions/global", { token });
+    }
+
+    async getGlobalProgress(token: string) {
+        return this.request<{
+            total_due: number;
+            total_concepts: number;
+            overall_mastery_percentage: number;
+            sessions_breakdown: Array<{
+                session_id: string;
+                title: string;
+                due_count: number;
+                total: number;
+                mastery_percentage: number;
+            }>;
+        }>("/quiz/progress/global", { token });
+    }
+
+    async getDashboardData(token: string) {
+        return this.request<{
+            sessions: Array<{
+                session_id: string;
+                title: string;
+                status: string;
+                created_at: string;
+            }>;
+            global_progress: {
+                total_due: number;
+                total_concepts: number;
+                overall_mastery_percentage: number;
+            };
+            sessions_progress: Array<{
+                session_id: string;
+                due_count: number;
+                total: number;
+                mastery_percentage: number;
+            }>;
+        }>("/dashboard/data", { token });
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);
+
