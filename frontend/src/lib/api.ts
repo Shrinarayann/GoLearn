@@ -277,7 +277,53 @@ class ApiClient {
             }>;
         }>("/dashboard/data", { token });
     }
+
+    // Exam Generation
+    async startExamGeneration(token: string, sessionId: string, file: File) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(
+            `${this.baseUrl}/exam/generate/${sessionId}`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Exam generation failed: ${response.status}`);
+        }
+
+        return response.json() as Promise<{
+            message: string;
+            status: string;
+        }>;
+    }
+
+    async getExamStatus(token: string, sessionId: string) {
+        return this.request<{
+            status: string;
+            pdf_url?: string;
+            error?: string;
+            generated_at?: string;
+        }>(`/exam/sessions/${sessionId}/status`, { token });
+    }
+
+    async resetExamStatus(token: string, sessionId: string) {
+        return this.request<{
+            message: string;
+        }>(`/exam/sessions/${sessionId}/reset`, {
+            method: "DELETE",
+            token,
+        });
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);
+
 

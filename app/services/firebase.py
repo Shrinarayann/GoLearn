@@ -194,6 +194,62 @@ class FirestoreService:
     async def update_question(self, question_id: str, data: dict) -> None:
         """Update a quiz question."""
         self.db.collection("quiz_questions").document(question_id).update(data)
+    
+    # --- Exam Generation ---
+    
+    async def update_exam_status(
+        self, 
+        session_id: str, 
+        status: str, 
+        pdf_url: str = None,
+        error: str = None
+    ) -> None:
+        """
+        Update exam generation status for a session.
+        
+        Args:
+            session_id: The session ID
+            status: One of 'idle', 'generating', 'ready', 'error'
+            pdf_url: Firebase Storage URL when status is 'ready'
+            error: Error message when status is 'error'
+        """
+        update_data = {
+            "exam_status": status,
+            "exam_updated_at": datetime.utcnow(),
+        }
+        
+        if pdf_url:
+            update_data["exam_pdf_url"] = pdf_url
+            update_data["exam_generated_at"] = datetime.utcnow()
+        
+        if error:
+            update_data["exam_error"] = error
+        
+        # Clear error if not in error state
+        if status != "error":
+            update_data["exam_error"] = None
+            
+        self.db.collection("study_sessions").document(session_id).update(update_data)
+    
+    async def get_exam_status(self, session_id: str) -> dict:
+        """
+        Get exam generation status for a session.
+        
+        Returns:
+            dict with keys: status, pdf_url, error, generated_at
+        """
+        doc = self.db.collection("study_sessions").document(session_id).get()
+        if not doc.exists:
+            return {"status": "idle", "pdf_url": None, "error": None}
+        
+        data = doc.to_dict()
+        return {
+            "status": data.get("exam_status", "idle"),
+            "pdf_url": data.get("exam_pdf_url"),
+            "error": data.get("exam_error"),
+            "generated_at": data.get("exam_generated_at"),
+        }
+
 
     # --- Quiz Concepts (SRS Tracking) ---
 

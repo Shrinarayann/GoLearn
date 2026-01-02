@@ -23,6 +23,8 @@ dependencies = [
     # PDF processing (required for pdf_image_service)
     "pymupdf>=1.23.0",
     "pillow>=10.0.0",
+    # PDF generation (required for exam generator)
+    "fpdf2>=2.7.0",
 ]
 
 [project.optional-dependencies]
