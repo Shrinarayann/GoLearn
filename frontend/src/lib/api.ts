@@ -238,6 +238,22 @@ class ApiClient {
             }>;
         }>("/dashboard/data", { token });
     }
+
+    async sendFeynmanMessage(token: string, sessionId: string, message: string) {
+        return this.request<{
+            response: string;
+        }>(`/feynman/sessions/${sessionId}/chat`, {
+            method: "POST",
+            token,
+            body: { message },
+        });
+    }
+
+    async getFeynmanGreeting(token: string, sessionId: string) {
+        return this.request<{
+            response: string;
+        }>(`/feynman/sessions/${sessionId}/greeting`, { token });
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);

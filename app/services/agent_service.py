@@ -20,6 +20,7 @@ from ..config import settings
 
 # Import ADK comprehension orchestrator
 from study_agent.comprehension.orchestrator import comprehension_orchestrator
+from study_agent.feynman import feynman_agent
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -47,6 +48,13 @@ _session_service = InMemorySessionService()
 # Create the ADK Runner for comprehension
 _comprehension_runner = Runner(
     agent=comprehension_orchestrator,
+    app_name="golearn",
+    session_service=_session_service
+)
+
+# Create the ADK Runner for Feynman
+_feynman_runner = Runner(
+    agent=feynman_agent,
     app_name="golearn",
     session_service=_session_service
 )
@@ -97,9 +105,11 @@ async def run_comprehension(
         try:
             uploaded_file = genai.upload_file(tmp_path, mime_type="application/pdf")
             # Create a Part from the uploaded file URI
-            content_parts.append(types.Part.from_uri(
-                file_uri=uploaded_file.uri,
-                mime_type="application/pdf"
+            content_parts.append(types.Part(
+                file_data=types.FileData(
+                    file_uri=uploaded_file.uri,
+                    mime_type="application/pdf"
+                )
             ))
             logger.info(f"Uploaded PDF to Gemini: {uploaded_file.name}")
         finally:
@@ -107,7 +117,7 @@ async def run_comprehension(
     
     # Add text content if provided
     if content:
-        content_parts.append(types.Part.from_text(content))
+        content_parts.append(types.Part(text=content))
     
     # If no content at all, error
     if not content_parts:
@@ -322,6 +332,132 @@ Be supportive and use simple terms. Max 3 sentences."""
         result["feedback"] = feedback_response.text
     
     return result
+
+
+async def run_feynman_chat(
+    user_message: str,
+    session_id: str,
+    study_context: dict
+) -> str:
+    """
+    Run the Feynman Technique chat using ADK.
+    
+    Args:
+        user_message: The message from the user teaching the concept
+        session_id: Session ID (shared with study session)
+        study_context: Context from Pass 1 & 2 analysis
+        
+    Returns:
+        The response from the "Novice Student" agent
+    """
+    # Create or update session state with context if it's the first message
+    adk_session_id = f"feynman_{session_id}"
+    
+    try:
+        session = await _session_service.get_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id
+        )
+    except:
+        session = None
+
+    if not session:
+        # First message - include context in state
+        await _session_service.create_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id,
+            state={"study_context": study_context},
+        )
+        logger.info(f"Created Feynman ADK session: {adk_session_id}")
+    
+    # Create the message content
+    message = types.Content(
+        role="user",
+        parts=[types.Part(text=user_message)]
+    )
+    
+    # Run the ADK agent
+    final_response_text = ""
+    try:
+        async for event in _feynman_runner.run_async(
+            user_id="golearn",
+            session_id=adk_session_id,
+            new_message=message
+        ):
+            # The LlmAgent should emit events with content
+            if hasattr(event, 'content') and event.content:
+                if isinstance(event.content, types.Content):
+                    final_response_text = "".join(p.text for p in event.content.parts if p.text)
+                else:
+                    final_response_text = str(event.content)
+    except Exception as e:
+        logger.error(f"Feynman ADK Runner error: {e}")
+        raise
+    
+    return final_response_text
+
+
+async def generate_feynman_greeting(
+    session_id: str,
+    study_context: dict
+) -> str:
+    """
+    Generate an initial, contextual greeting from the Feynman student.
+    
+    Args:
+        session_id: Session ID
+        study_context: Context from Pass 1 & 2 analysis
+        
+    Returns:
+        A greeting like "Hi! I'm trying to learn about [Topic]. Can you explain [Concept] to me?"
+    """
+    adk_session_id = f"feynman_{session_id}"
+    
+    # Initialize session if needed
+    try:
+        session = await _session_service.get_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id
+        )
+    except:
+        session = None
+
+    if not session:
+        await _session_service.create_session(
+            app_name="golearn",
+            user_id="golearn",
+            session_id=adk_session_id,
+            state={"study_context": study_context},
+        )
+    
+    # Send a prompt to the agent to generate a greeting
+    prompt = "Introduce yourself as a curious student who wants to learn about this topic. Based on the study_context, pick one specific concept you find most interesting or confusing and ask me to explain it simply to you."
+    
+    message = types.Content(
+        role="user",
+        parts=[types.Part(text=prompt)]
+    )
+    
+    final_response_text = ""
+    try:
+        async for event in _feynman_runner.run_async(
+            user_id="golearn",
+            session_id=adk_session_id,
+            new_message=message
+        ):
+            if hasattr(event, 'content') and event.content:
+                if isinstance(event.content, types.Content):
+                    final_response_text = "".join(p.text for p in event.content.parts if p.text)
+                else:
+                    final_response_text = str(event.content)
+    except Exception as e:
+        logger.error(f"Feynman Greeting error: {e}")
+        return "Hi! I'm really curious about what you're studying. Could you explain it to me?"
+    
+    return final_response_text
 
 
 def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:
