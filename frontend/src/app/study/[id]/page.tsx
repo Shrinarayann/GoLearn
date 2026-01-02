@@ -13,6 +13,7 @@ interface SessionData {
     session_id: string;
     title: string;
     status: string;
+    enable_spaced_repetition?: boolean;  // New field
     pdf_filename?: string;
     exploration_result?: ExplorationResult;
     engagement_result?: EngagementResult;
@@ -570,8 +571,8 @@ function EngagementTab({ data }: { data: EngagementResult }) {
                                             {imageCaption.type}
                                         </span>
                                         <span className={`px-2 py-1 rounded text-xs font-medium ${imageCaption.relevance === 'high' ? 'bg-[#DE350B] text-white' :
-                                                imageCaption.relevance === 'medium' ? 'bg-[#FFAB00] text-white' :
-                                                    'bg-[#6B778C] text-white'
+                                            imageCaption.relevance === 'medium' ? 'bg-[#FFAB00] text-white' :
+                                                'bg-[#6B778C] text-white'
                                             }`}>
                                             {imageCaption.relevance}
                                         </span>

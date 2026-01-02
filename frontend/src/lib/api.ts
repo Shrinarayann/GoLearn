@@ -64,7 +64,7 @@ class ApiClient {
     }
 
     // Study Sessions
-    async createSession(token: string, title: string, content?: string) {
+    async createSession(token: string, title: string, content?: string, enableSpacedRepetition: boolean = true) {
         return this.request<{
             session_id: string;
             title: string;
@@ -72,7 +72,7 @@ class ApiClient {
         }>("/study/sessions", {
             method: "POST",
             token,
-            body: { title, content },
+            body: { title, content, enable_spaced_repetition: enableSpacedRepetition },
         });
     }
 
@@ -82,6 +82,7 @@ class ApiClient {
             title: string;
             status: string;
             created_at: string;
+            enable_spaced_repetition?: boolean;
         }>>("/study/sessions", { token });
     }
 
@@ -264,6 +265,7 @@ class ApiClient {
                 title: string;
                 status: string;
                 created_at: string;
+                enable_spaced_repetition?: boolean;
             }>;
             global_progress: {
                 total_due: number;
