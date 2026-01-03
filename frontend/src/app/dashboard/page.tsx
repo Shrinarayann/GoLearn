@@ -104,14 +104,8 @@ export default function DashboardPage() {
 
         try {
             await api.deleteSession(token, sessionId);
-            // Update local state to remove the session
-            setSessions(prev => prev.filter(s => s.session_id !== sessionId));
-            // Also clean up progress data
-            setProgressData(prev => {
-                const next = { ...prev };
-                delete next[sessionId];
-                return next;
-            });
+            // Refresh all data to ensure global stats and sessions are synchronized
+            await loadDashboardData();
         } catch (error) {
             console.error("Failed to delete session:", error);
             alert("Failed to delete session. Please try again.");

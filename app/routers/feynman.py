@@ -170,7 +170,9 @@ async def get_feynman_topics(
     
     topics = []
     for t_name in sorted(list(topic_set)):
-        mastery_info = mastery_map.get(t_name)
+        # Match the safe key logic used in firebase.py
+        safe_name = t_name.replace(".", "_dot_")
+        mastery_info = mastery_map.get(safe_name)
         mastery = None
         if mastery_info:
             mastery = FeynmanTopicMastery(
