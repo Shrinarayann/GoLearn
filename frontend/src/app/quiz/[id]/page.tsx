@@ -61,6 +61,7 @@ export default function QuizPage() {
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answer, setAnswer] = useState("");
+    const [loadingQuestions, setLoadingQuestions] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
@@ -86,14 +87,17 @@ export default function QuizPage() {
         if (!token) return;
         if (questions.length > 0) return;
 
+        setLoadingQuestions(true);
         try {
             if (isGlobalMode) {
                 const data = await api.getGlobalDueQuestions(token);
                 setQuestions(data);
+                setLoadingQuestions(false);
             } else {
                 const data = await api.getQuestions(token, sessionId, isReviewMode);
                 if (data.length > 0) {
                     setQuestions(data);
+                    setLoadingQuestions(false);
                 } else if (!isReviewMode) {
                     generateQuiz();
                 }
@@ -101,6 +105,8 @@ export default function QuizPage() {
         } catch (error) {
             if (!isReviewMode && !isGlobalMode) {
                 generateQuiz();
+            } else {
+                setLoadingQuestions(false);
             }
         }
     };
@@ -108,6 +114,7 @@ export default function QuizPage() {
     const generateQuiz = async () => {
         if (!token) return;
         setGenerating(true);
+        setLoadingQuestions(true);
         try {
             const data = await api.generateQuiz(token, sessionId);
             setQuestions(data);
@@ -115,6 +122,7 @@ export default function QuizPage() {
             console.error("Failed to generate quiz:", error);
         } finally {
             setGenerating(false);
+            setLoadingQuestions(false);
         }
     };
 
@@ -396,11 +404,11 @@ export default function QuizPage() {
             </header>
 
             <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {generating ? (
+                {loadingQuestions ? (
                     <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 sm:p-12 text-center">
                         <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-2 border-[#0052CC] border-t-transparent mx-auto mb-4"></div>
-                        <h2 className="text-base sm:text-lg font-semibold text-[#172B4D]">Generating Quiz Questions...</h2>
-                        <p className="text-[#6B778C] mt-2 text-xs sm:text-sm">Creating personalized questions based on your study material</p>
+                        <h2 className="text-base sm:text-lg font-semibold text-[#172B4D]">Loading Quiz...</h2>
+                        <p className="text-[#6B778C] mt-2 text-xs sm:text-sm">Please wait while we prepare your questions</p>
                     </div>
                 ) : allAnswered ? (
                     <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 sm:p-12 text-center">
