@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # Next.js dev
         "http://127.0.0.1:3000",
+        "https://murray-variety-opinions-posted.trycloudflare.comhttps://murray-variety-opinions-posted.trycloudflare.com"
     ]
     
     # Google/Gemini
