@@ -79,6 +79,29 @@ export default function DashboardPage() {
         }
     }, [token, loadDashboardData]);
 
+    const deleteSession = async (sessionId: string) => {
+        if (!token) return;
+
+        if (!window.confirm("Are you sure you want to permanently delete this study session and all its data? This action cannot be undone.")) {
+            return;
+        }
+
+        try {
+            await api.deleteSession(token, sessionId);
+            // Update local state to remove the session
+            setSessions(prev => prev.filter(s => s.session_id !== sessionId));
+            // Also clean up progress data
+            setProgressData(prev => {
+                const next = { ...prev };
+                delete next[sessionId];
+                return next;
+            });
+        } catch (error) {
+            console.error("Failed to delete session:", error);
+            alert("Failed to delete session. Please try again.");
+        }
+    };
+
     const createSession = async () => {
         if (!token || !newTitle.trim()) return;
 
@@ -277,6 +300,19 @@ export default function DashboardPage() {
                                                         )}
                                                     </div>
                                                 </div>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        deleteSession(session.session_id);
+                                                    }}
+                                                    className="p-1.5 text-[#6B778C] hover:text-[#DE350B] hover:bg-[#FFEBE6] rounded transition-colors"
+                                                    title="Delete session"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                    </svg>
+                                                </button>
                                             </div>
                                             <p className="text-xs text-[#6B778C]">{formatDate(session.created_at)}</p>
                                         </Link>
@@ -370,6 +406,15 @@ export default function DashboardPage() {
                                                         >
                                                             Open
                                                         </Link>
+                                                        <button
+                                                            onClick={() => deleteSession(session.session_id)}
+                                                            className="p-1.5 text-[#6B778C] hover:text-[#DE350B] hover:bg-[#FFEBE6] rounded transition-colors"
+                                                            title="Delete session"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                            </svg>
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </tr>

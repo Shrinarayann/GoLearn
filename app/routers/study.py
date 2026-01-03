@@ -10,7 +10,7 @@ from datetime import datetime
 
 from ..dependencies import get_current_user
 from ..services.firebase import FirestoreService
-from ..services.storage_service import upload_file_to_storage
+from ..services.storage_service import upload_file_to_storage, delete_session_files
 from ..services.agent_service import run_comprehension
 from ..services.pdf_image_service import extract_images_from_pdf_bytes_as_base64
 
@@ -326,5 +326,41 @@ async def extract_pdf_images(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Image extraction failed: {str(e)}"
+        )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Permanently delete a study session and all associated data.
+    """
+    # Verify session ownership
+    session = await db.get_session(session_id)
+    if not session or session["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    try:
+        # 1. Delete associated data in Firestore
+        await db.delete_session_questions(session_id)
+        await db.delete_session_concepts(session_id)
+        
+        # 2. Delete files in Storage
+        await delete_session_files(session_id)
+        
+        # 3. Delete the session itself
+        await db.delete_session(session_id)
+        
+        return {"message": "Session and all associated data deleted successfully"}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete session: {str(e)}"
         )
 

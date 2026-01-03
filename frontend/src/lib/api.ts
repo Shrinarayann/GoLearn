@@ -63,6 +63,21 @@ class ApiClient {
         }>("/auth/me", { token });
     }
 
+    async registerFcmToken(token: string, fcmToken: string) {
+        return this.request<{ message: string }>("/notifications/fcm-token", {
+            method: "POST",
+            token,
+            body: { token: fcmToken },
+        });
+    }
+
+    async triggerNotificationCheck(token: string) {
+        return this.request<{ status: string, summary: any }>("/notifications/trigger-check", {
+            method: "POST",
+            token,
+        });
+    }
+
     // Study Sessions
     async createSession(token: string, title: string, content?: string, enableSpacedRepetition: boolean = true) {
         return this.request<{
@@ -96,6 +111,13 @@ class ApiClient {
             engagement_result?: Record<string, unknown>;
             application_result?: Record<string, unknown>;
         }>(`/study/sessions/${sessionId}`, { token });
+    }
+
+    async deleteSession(token: string, sessionId: string) {
+        return this.request<{ message: string }>(`/study/sessions/${sessionId}`, {
+            method: "DELETE",
+            token,
+        });
     }
 
     async uploadPdf(token: string, sessionId: string, file: File) {

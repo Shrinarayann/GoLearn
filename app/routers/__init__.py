@@ -1,3 +1,3 @@
 """Routers package."""
 
-from . import auth, study, quiz, dashboard, feynman, voice
+from . import auth, study, quiz, dashboard, feynman, voice, notifications

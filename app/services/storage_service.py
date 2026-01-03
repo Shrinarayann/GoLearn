@@ -174,6 +174,22 @@ async def delete_file_from_storage(path: str) -> bool:
         return False
 
 
+async def delete_session_files(session_id: str) -> None:
+    """
+    Delete all files associated with a session in Firebase Storage.
+    """
+    get_firebase_app()
+    
+    try:
+        bucket = storage.bucket()
+        # Delete blobs with the session prefix
+        blobs = bucket.list_blobs(prefix=f"sessions/{session_id}/")
+        for blob in blobs:
+            blob.delete()
+    except Exception as e:
+        print(f"Failed to delete session files: {e}")
+
+
 async def get_file_url(path: str) -> Optional[str]:
     """
     Get the public URL for a file in storage.

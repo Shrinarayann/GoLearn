@@ -152,6 +152,25 @@ class FirestoreService:
             data["question_id"] = doc.id
             questions.append(data)
         return questions
+
+    async def delete_session_questions(self, session_id: str) -> None:
+        """Delete all questions for a session."""
+        docs = (
+            self.db.collection("quiz_questions")
+            .where("session_id", "==", session_id)
+            .stream()
+        )
+        batch = self.db.batch()
+        count = 0
+        for doc in docs:
+            batch.delete(doc.reference)
+            count += 1
+            if count >= 400:  # Firestore batch limit is 500
+                batch.commit()
+                batch = self.db.batch()
+                count = 0
+        if count > 0:
+            batch.commit()
     
     async def get_user_questions(
         self, 
@@ -281,6 +300,25 @@ class FirestoreService:
             data["concept_id"] = doc.id
             concepts.append(data)
         return concepts
+
+    async def delete_session_concepts(self, session_id: str) -> None:
+        """Delete all SRS tracked concepts for a session."""
+        docs = (
+            self.db.collection("quiz_concepts")
+            .where("session_id", "==", session_id)
+            .stream()
+        )
+        batch = self.db.batch()
+        count = 0
+        for doc in docs:
+            batch.delete(doc.reference)
+            count += 1
+            if count >= 400:
+                batch.commit()
+                batch = self.db.batch()
+                count = 0
+        if count > 0:
+            batch.commit()
 
     async def create_concept(self, concept_data: dict) -> str:
         """Create SRS tracking for a concept."""
