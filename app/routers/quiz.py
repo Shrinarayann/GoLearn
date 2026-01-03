@@ -3,10 +3,11 @@ Quiz and retention routes.
 Handles question generation, answers, and Leitner box management.
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, status, Depends
+from typing import List, Optional, Dict
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+import asyncio
 
 from ..dependencies import get_current_user
 from ..services.firebase import FirestoreService
@@ -84,6 +85,42 @@ class GlobalProgressResponse(BaseModel):
     total_concepts: int
     overall_mastery_percentage: float
     sessions_breakdown: List[SessionBreakdown]
+
+
+class SubmitResponse(BaseModel):
+    """Response for fire-and-forget answer submission."""
+    status: str
+    question_id: str
+    message: str
+
+
+class QuestionResult(BaseModel):
+    """Single question result for batch results endpoint."""
+    question_id: str
+    question: str
+    question_type: str
+    difficulty: str
+    concept: str
+    user_answer: str
+    correct: Optional[bool] = None
+    correct_answer: str
+    explanation: str
+    feedback: Optional[str] = None
+    new_leitner_box: Optional[int] = None
+    evaluation_status: str  # "pending", "completed", "failed"
+
+
+class QuizResultsResponse(BaseModel):
+    """Response for batch quiz results."""
+    session_id: str
+    total_questions: int
+    evaluated_count: int
+    correct_count: int
+    results: List[QuestionResult]
+
+
+# In-memory store for pending evaluations (for tracking)
+pending_evaluations: Dict[str, asyncio.Task] = {}
 
 
 # --- Routes ---
@@ -435,6 +472,273 @@ async def submit_answer(
         new_difficulty=new_d,
         next_review_at=next_review,
         feedback=result.get("feedback") if not result["correct"] else None,
+    )
+
+
+# --- Background Evaluation Helper ---
+
+async def evaluate_answer_background(
+    question_id: str,
+    user_answer: str,
+    session_id: str,
+    sr_enabled: bool
+):
+    """
+    Background task to evaluate an answer and update Leitner box.
+    This runs asynchronously while the user continues answering.
+    """
+    try:
+        # Get question data
+        question = await db.get_question(question_id)
+        if not question:
+            await db.update_question(question_id, {
+                "evaluation_status": "failed",
+                "evaluation_error": "Question not found"
+            })
+            return
+        
+        # Get session for context
+        session = await db.get_session(session_id)
+        
+        # Evaluate answer using AI
+        result = await evaluate_answer(
+            user_answer=user_answer,
+            correct_answer=question["correct_answer"],
+            question=question["question"],
+            concept=question.get("concept", ""),
+            engagement_result=session.get("engagement_result", {}) if session else {}
+        )
+        
+        # Handle parse errors
+        if "parse_error" in result or "correct" not in result:
+            await db.update_question(question_id, {
+                "evaluation_status": "failed",
+                "evaluation_error": "Failed to evaluate answer"
+            })
+            return
+        
+        # Update Leitner box and FSRS (same logic as submit_answer)
+        if sr_enabled:
+            concept_name = question.get("concept", "general")
+            concept_data = await db.get_concept(session_id, concept_name)
+            current_box = question.get("leitner_box", 1)
+            
+            if result["correct"]:
+                new_box = min(current_box + 1, 5)
+                
+                if concept_data:
+                    last_reviewed = concept_data.get("last_reviewed")
+                    if last_reviewed:
+                        if isinstance(last_reviewed, str):
+                            last_reviewed = datetime.fromisoformat(last_reviewed.replace('Z', '+00:00')).replace(tzinfo=None)
+                        else:
+                            last_reviewed = last_reviewed.replace(tzinfo=None)
+                        delta = datetime.utcnow() - last_reviewed
+                        days_since = max(0.1, delta.total_seconds() / 86400.0)
+                    else:
+                        days_since = 0.0
+                    
+                    new_s, new_d, _ = fsrs.step(
+                        stability=concept_data.get("stability", 1.0),
+                        difficulty=concept_data.get("difficulty", 5.0),
+                        rating=3,
+                        days_since_last_review=days_since
+                    )
+                    
+                    next_review = datetime.utcnow() + timedelta(days=new_s)
+                    
+                    await db.update_concept(concept_data["concept_id"], {
+                        "stability": new_s,
+                        "difficulty": new_d,
+                        "last_reviewed": datetime.utcnow(),
+                        "next_review_at": next_review,
+                        "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+                    })
+                else:
+                    new_s, new_d = 1.0, 5.0
+                    next_review = datetime.utcnow() + timedelta(days=1)
+            else:
+                new_box = 1
+                new_s = 1.0
+                new_d = question.get("fsrs_difficulty") or 5.0
+                next_review = datetime.utcnow()
+                
+                if concept_data:
+                    await db.update_concept(concept_data["concept_id"], {
+                        "stability": new_s,
+                        "last_reviewed": datetime.utcnow(),
+                        "next_review_at": next_review,
+                        "times_reviewed": concept_data.get("times_reviewed", 0) + 1
+                    })
+            
+            # Update question with evaluation results
+            await db.update_question(question_id, {
+                "last_reviewed": datetime.utcnow(),
+                "times_reviewed": question.get("times_reviewed", 0) + 1,
+                "stability": new_s,
+                "fsrs_difficulty": new_d,
+                "leitner_box": new_box,
+                "next_review_at": next_review,
+                "evaluation_status": "completed",
+                "evaluated_correct": result["correct"],
+                "evaluation_feedback": result.get("feedback"),
+            })
+        else:
+            # Non-SR session
+            await db.update_question(question_id, {
+                "times_reviewed": question.get("times_reviewed", 0) + 1,
+                "evaluation_status": "completed",
+                "evaluated_correct": result["correct"],
+                "evaluation_feedback": result.get("feedback"),
+            })
+        
+        # Remove from pending evaluations
+        if question_id in pending_evaluations:
+            del pending_evaluations[question_id]
+            
+    except Exception as e:
+        # Mark as failed
+        try:
+            await db.update_question(question_id, {
+                "evaluation_status": "failed",
+                "evaluation_error": str(e)
+            })
+        except:
+            pass
+        if question_id in pending_evaluations:
+            del pending_evaluations[question_id]
+
+
+@router.post("/questions/{question_id}/submit", response_model=SubmitResponse)
+async def submit_answer_async(
+    question_id: str,
+    request: AnswerRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Submit an answer for background evaluation (fire-and-forget).
+    Returns immediately while evaluation happens in background.
+    """
+    # Get question
+    question = await db.get_question(question_id)
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Question not found"
+        )
+    
+    # Verify ownership through session
+    session = await db.get_session(question["session_id"])
+    if not session or session["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized"
+        )
+    
+    sr_enabled = session.get("enable_spaced_repetition", True)
+    
+    # Store the user's answer immediately
+    await db.update_question(question_id, {
+        "user_answer": request.answer,
+        "answered_at": datetime.utcnow(),
+        "evaluation_status": "pending"
+    })
+    
+    # Start background evaluation
+    task = asyncio.create_task(
+        evaluate_answer_background(
+            question_id=question_id,
+            user_answer=request.answer,
+            session_id=question["session_id"],
+            sr_enabled=sr_enabled
+        )
+    )
+    pending_evaluations[question_id] = task
+    
+    return SubmitResponse(
+        status="submitted",
+        question_id=question_id,
+        message="Answer submitted. Evaluation in progress."
+    )
+
+
+@router.get("/sessions/{session_id}/results", response_model=QuizResultsResponse)
+async def get_quiz_results(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all quiz results for a session.
+    Waits for pending evaluations (with timeout) then returns all results.
+    """
+    # Verify session
+    session = await db.get_session(session_id)
+    if not session or session["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    # Get all questions for this session
+    questions = await db.get_session_questions(session_id, due_only=False)
+    
+    # Filter to only answered questions
+    answered_questions = [q for q in questions if q.get("user_answer")]
+    
+    # Wait for any pending evaluations (max 15 seconds)
+    pending_for_session = [
+        (qid, task) for qid, task in pending_evaluations.items()
+        if any(q["question_id"] == qid for q in answered_questions)
+    ]
+    
+    if pending_for_session:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[task for _, task in pending_for_session], return_exceptions=True),
+                timeout=15.0
+            )
+        except asyncio.TimeoutError:
+            pass  # Continue with partial results
+    
+    # Refresh questions after waiting
+    questions = await db.get_session_questions(session_id, due_only=False)
+    answered_questions = [q for q in questions if q.get("user_answer")]
+    
+    # Build results
+    results = []
+    correct_count = 0
+    evaluated_count = 0
+    
+    for q in answered_questions:
+        eval_status = q.get("evaluation_status", "pending")
+        is_correct = q.get("evaluated_correct")
+        
+        if eval_status == "completed":
+            evaluated_count += 1
+            if is_correct:
+                correct_count += 1
+        
+        results.append(QuestionResult(
+            question_id=q["question_id"],
+            question=q["question"],
+            question_type=q.get("question_type", "recall"),
+            difficulty=q.get("difficulty", "medium"),
+            concept=q.get("concept", "general"),
+            user_answer=q.get("user_answer", ""),
+            correct=is_correct,
+            correct_answer=q.get("correct_answer", ""),
+            explanation=q.get("explanation", ""),
+            feedback=q.get("evaluation_feedback"),
+            new_leitner_box=q.get("leitner_box") if eval_status == "completed" else None,
+            evaluation_status=eval_status
+        ))
+    
+    return QuizResultsResponse(
+        session_id=session_id,
+        total_questions=len(answered_questions),
+        evaluated_count=evaluated_count,
+        correct_count=correct_count,
+        results=results
     )
 
 

@@ -220,6 +220,41 @@ class ApiClient {
         });
     }
 
+    async submitAnswerAsync(token: string, questionId: string, answer: string) {
+        return this.request<{
+            status: string;
+            question_id: string;
+            message: string;
+        }>(`/quiz/questions/${questionId}/submit`, {
+            method: "POST",
+            token,
+            body: { answer },
+        });
+    }
+
+    async getQuizResults(token: string, sessionId: string) {
+        return this.request<{
+            session_id: string;
+            total_questions: number;
+            evaluated_count: number;
+            correct_count: number;
+            results: Array<{
+                question_id: string;
+                question: string;
+                question_type: string;
+                difficulty: string;
+                concept: string;
+                user_answer: string;
+                correct: boolean | null;
+                correct_answer: string;
+                explanation: string;
+                feedback: string | null;
+                new_leitner_box: number | null;
+                evaluation_status: string;
+            }>;
+        }>(`/quiz/sessions/${sessionId}/results`, { token });
+    }
+
     async getProgress(token: string, sessionId: string) {
         return this.request<{
             session_id: string;
