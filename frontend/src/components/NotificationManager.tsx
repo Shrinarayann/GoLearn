@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { getToken, onMessage } from "firebase/messaging";
 import { messaging } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,7 @@ export default function NotificationManager() {
     const [permission, setPermission] = useState<NotificationPermission>("default");
     const [isRegistering, setIsRegistering] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
+    const lastRegisteredToken = useRef<string | null>(null);
 
     const updatePermission = useCallback(() => {
         if ("Notification" in window) {
@@ -49,10 +50,18 @@ export default function NotificationManager() {
 
             if (fcmToken) {
                 console.log("SUCCESS! Got FCM Token:", fcmToken);
-                setStatus("Token received! Syncing with backend...");
-                await api.registerFcmToken(idToken, fcmToken);
+
+                // Only register if token has changed
+                if (fcmToken !== lastRegisteredToken.current) {
+                    setStatus("Token received! Syncing with backend...");
+                    await api.registerFcmToken(idToken, fcmToken);
+                    lastRegisteredToken.current = fcmToken;
+                    console.log("Token synced successfully.");
+                } else {
+                    console.log("Token unchanged, skipping registration.");
+                }
+
                 setStatus(null);
-                console.log("Token synced successfully.");
             } else {
                 setStatus("Error: Firebase returned an empty token.");
             }
@@ -69,10 +78,10 @@ export default function NotificationManager() {
     }, [user, idToken]);
 
     useEffect(() => {
-        if (permission === "granted" && !isRegistering && !status) {
+        if (permission === "granted" && !isRegistering) {
             setupNotifications();
         }
-    }, [permission, setupNotifications, isRegistering, status]);
+    }, [permission, setupNotifications, isRegistering]);
 
     const handleRequest = async () => {
         setStatus(null);
@@ -122,7 +131,11 @@ export default function NotificationManager() {
         }
     };
 
-    if (permission !== "granted" || status) {
+    // Only show modal if permission not granted, or if there's an error/important status
+    // Don't show for transient registration status messages
+    const shouldShowModal = permission !== "granted" || (status && !isRegistering);
+
+    if (shouldShowModal) {
         return (
             <div className="fixed bottom-4 right-4 z-50 p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 max-w-sm transition-all animate-in fade-in duration-500">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
