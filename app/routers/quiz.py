@@ -31,6 +31,8 @@ class QuestionResponse(BaseModel):
     stability: Optional[float] = 1.0
     fsrs_difficulty: Optional[float] = 5.0
     leitner_box: int = 1
+    user_answer: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class AnswerRequest(BaseModel):
@@ -68,6 +70,7 @@ class GlobalQuestionResponse(BaseModel):
     leitner_box: int
     session_id: str
     session_title: str
+    user_answer: Optional[str] = None
 
 
 class SessionBreakdown(BaseModel):
@@ -150,10 +153,13 @@ async def generate_quiz(
             detail="Session must complete comprehension before generating quiz"
         )
     
-    # If already quizzing, return existing questions
+    # If already quizzing, return existing questions (sorted by box and creation time)
     if session["status"] == "quizzing":
         existing_questions = await db.get_session_questions(session_id)
         if existing_questions:
+            # Sort by box and creation time
+            existing_questions.sort(key=lambda x: (x.get("leitner_box", 1), x.get("created_at", datetime.min)))
+            
             return [
                 QuestionResponse(
                     question_id=q["question_id"],
@@ -162,6 +168,8 @@ async def generate_quiz(
                     difficulty=q.get("difficulty", "medium"),
                     concept=q.get("concept", "general"),
                     leitner_box=q.get("leitner_box", 1),
+                    user_answer=q.get("user_answer"),
+                    session_id=session_id
                 )
                 for q in existing_questions
             ]
@@ -253,6 +261,8 @@ async def generate_quiz(
             stability=q_data.get("stability", 1.0),
             fsrs_difficulty=q_data.get("fsrs_difficulty", 5.0),
             leitner_box=1,
+            user_answer=None,
+            session_id=session_id
         ))
     
     # Update session status
@@ -265,11 +275,13 @@ async def generate_quiz(
 async def get_questions(
     session_id: str,
     due_only: bool = False,
+    resume: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
     """
     Get all questions for a session.
     If due_only=True, returns only questions due for review based on Leitner schedule.
+    If resume=True, sorts questions so unattempted ones come first (ordered by leitner_box).
     """
     # Verify session
     session = await db.get_session(session_id)
@@ -280,6 +292,8 @@ async def get_questions(
         )
     
     questions = await db.get_session_questions(session_id, due_only=False)
+    # Sort in memory by creation time for stability
+    questions.sort(key=lambda x: x.get("created_at", datetime.min))
     
     # Check if spaced repetition is enabled for this session
     sr_enabled = session.get("enable_spaced_repetition", True)
@@ -326,9 +340,14 @@ async def get_questions(
                 stability=q.get("stability"),
                 fsrs_difficulty=q.get("fsrs_difficulty"),
                 leitner_box=q.get("leitner_box", 1),
+                user_answer=q.get("user_answer"),
+                session_id=session_id
             )
             for q in due_questions
         ]
+
+    # Sort by box and creation time for a stable, mastery-focused order
+    questions.sort(key=lambda x: (x.get("leitner_box", 1), x.get("created_at", datetime.min)))
 
     return [
         QuestionResponse(
@@ -338,6 +357,8 @@ async def get_questions(
             difficulty=q.get("difficulty", "medium"),
             concept=q.get("concept", "general"),
             leitner_box=q.get("leitner_box", 1),
+            user_answer=q.get("user_answer"),
+            session_id=session_id
         )
         for q in questions
     ]
@@ -877,6 +898,7 @@ async def get_global_due_questions(
             leitner_box=q.get("leitner_box", 1),
             session_id=q["session_id"],
             session_title=q.get("session_title", "Unknown"),
+            user_answer=q.get("user_answer")
         )
         for q in due_questions
     ]

@@ -5,6 +5,8 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Question {
     question_id: string;
@@ -17,6 +19,7 @@ interface Question {
     leitner_box: number;
     session_id?: string;
     session_title?: string;
+    user_answer?: string;
 }
 
 interface QuizResult {
@@ -60,6 +63,7 @@ export default function QuizPage() {
 
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
+    const [error, setError] = useState<string | null>(null);
     const [answer, setAnswer] = useState("");
     const [loadingQuestions, setLoadingQuestions] = useState(true);
     const [generating, setGenerating] = useState(false);
@@ -83,6 +87,39 @@ export default function QuizPage() {
         }
     }, [token, sessionId]);
 
+    const initializeQuiz = (data: Question[]) => {
+        if (data.length === 0) {
+            setLoadingQuestions(false);
+            return;
+        }
+
+        setQuestions(data);
+
+        // Sync answered questions to local state
+        const answeredItems = data
+            .filter(q => q.user_answer)
+            .map(q => ({
+                questionId: q.question_id,
+                answer: q.user_answer!,
+                sessionId: q.session_id || sessionId
+            }));
+        setSubmittedAnswers(answeredItems);
+
+        // Determine if all are answered
+        if (answeredItems.length === data.length) {
+            setAllAnswered(true);
+            setLoadingQuestions(false);
+            fetchResults();
+        } else {
+            // Find the first unanswered index to resume exactly where we left off
+            const firstUnanswered = data.findIndex(q => !q.user_answer);
+            if (firstUnanswered !== -1) {
+                setCurrentIndex(firstUnanswered);
+            }
+            setLoadingQuestions(false);
+        }
+    };
+
     const loadQuestions = async () => {
         if (!token) return;
         if (questions.length > 0) return;
@@ -91,18 +128,21 @@ export default function QuizPage() {
         try {
             if (isGlobalMode) {
                 const data = await api.getGlobalDueQuestions(token);
-                setQuestions(data);
-                setLoadingQuestions(false);
+                initializeQuiz(data);
             } else {
-                const data = await api.getQuestions(token, sessionId, isReviewMode);
+                // Use resume=true for standard quiz loading
+                const data = await api.getQuestions(token, sessionId, isReviewMode, true);
                 if (data.length > 0) {
-                    setQuestions(data);
-                    setLoadingQuestions(false);
+                    initializeQuiz(data);
                 } else if (!isReviewMode) {
                     generateQuiz();
+                } else {
+                    setLoadingQuestions(false);
                 }
             }
-        } catch (error) {
+        } catch (error: any) {
+            console.error("DEBUG: loadQuestions Failed:", error);
+            setError(error.message || "Failed to load quiz questions. Please check if the backend is running.");
             if (!isReviewMode && !isGlobalMode) {
                 generateQuiz();
             } else {
@@ -117,12 +157,12 @@ export default function QuizPage() {
         setLoadingQuestions(true);
         try {
             const data = await api.generateQuiz(token, sessionId);
-            setQuestions(data);
+            initializeQuiz(data);
         } catch (error) {
             console.error("Failed to generate quiz:", error);
+            setLoadingQuestions(false);
         } finally {
             setGenerating(false);
-            setLoadingQuestions(false);
         }
     };
 
@@ -153,6 +193,13 @@ export default function QuizPage() {
         }
 
         setSubmitting(false);
+    };
+
+    // Save progress and show partial results
+    const saveAndExit = async () => {
+        if (!token || submittedAnswers.length === 0) return;
+        setAllAnswered(true);
+        await fetchResults();
     };
 
     const fetchResults = async () => {
@@ -212,21 +259,18 @@ export default function QuizPage() {
     const answeredProgress = questions.length > 0 ? (submittedAnswers.length / questions.length) * 100 : 0;
 
     const getDifficultyColor = (diff: string) => {
-        switch (diff) {
-            case "easy": return "bg-[#E3FCEF] text-[#006644]";
-            case "medium": return "bg-[#FFFAE6] text-[#974F0C]";
-            case "hard": return "bg-[#FFEBE6] text-[#DE350B]";
-            default: return "bg-[#F4F5F7] text-[#6B778C]";
-        }
+        const d = diff.toLowerCase();
+        if (d === 'easy') return "bg-[#E3FCEF] text-[#006644] border border-[#ABF5D1]";
+        if (d === 'medium') return "bg-[#FFF0B3] text-[#172B4D] border border-[#FFE380]";
+        if (d === 'hard') return "bg-[#FFEBE6] text-[#BF2600] border border-[#FFBDAD]";
+        return "bg-[#F4F5F7] text-[#42526E] border border-[#DFE1E6]";
     };
 
     const getTypeColor = (type: string) => {
-        switch (type) {
-            case "recall": return "bg-[#DEEBFF] text-[#0747A6]";
-            case "understanding": return "bg-[#EAE6FF] text-[#403294]";
-            case "application": return "bg-[#E3FCEF] text-[#006644]";
-            default: return "bg-[#F4F5F7] text-[#6B778C]";
-        }
+        const t = type.toLowerCase();
+        if (t === 'multiple choice') return "bg-[#DEEBFF] text-[#0747A6] border border-[#B3D4FF]";
+        if (t === 'short answer') return "bg-[#EAE6FF] text-[#403294] border border-[#C0B6F2]";
+        return "bg-[#F4F5F7] text-[#42526E] border border-[#DFE1E6]";
     };
 
     // Show results view
@@ -238,57 +282,66 @@ export default function QuizPage() {
         return (
             <div className="min-h-screen bg-[#FAFBFC]">
                 <header className="bg-white border-b border-[#DFE1E6] sticky top-0 z-10">
-                    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4">
-                        <div className="flex items-center justify-between">
-                            <h1 className="text-xl font-bold text-[#172B4D]">Quiz Results</h1>
-                            <div className="flex items-center gap-3">
-                                <span className={`px-4 py-2 rounded-lg text-lg font-bold ${percentage >= 70 ? "bg-[#E3FCEF] text-[#006644]" :
-                                    percentage >= 50 ? "bg-[#FFFAE6] text-[#FF8B00]" :
-                                        "bg-[#FFEBE6] text-[#DE350B]"
-                                    }`}>
-                                    {quizResults.correct_count}/{quizResults.total_questions} ({percentage}%)
-                                </span>
+                    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3 sm:gap-4">
+                                <Link
+                                    href={isGlobalMode ? "/dashboard" : `/study/${sessionId}`}
+                                    className="text-[#6B778C] hover:text-[#172B4D] transition-colors text-sm font-medium"
+                                >
+                                    ← {isGlobalMode ? "Dashboard" : "Back"}
+                                </Link>
+                                <span className="text-[#DFE1E6] hidden sm:inline">|</span>
+                                <h1 className="text-sm font-semibold text-[#172B4D]">Quiz Results</h1>
                             </div>
+                            <span className={`px-3 py-1.5 rounded text-sm font-semibold ${percentage >= 70 ? "bg-[#E3FCEF] text-[#006644]" :
+                                percentage >= 50 ? "bg-[#FFFAE6] text-[#974F0C]" :
+                                    "bg-[#FFEBE6] text-[#DE350B]"
+                                }`}>
+                                {quizResults.correct_count}/{quizResults.total_questions} ({percentage}%)
+                            </span>
                         </div>
                     </div>
                 </header>
 
-                <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
+                <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
                     {/* Summary Card */}
-                    <div className="bg-white rounded-lg border border-[#DFE1E6] p-6 mb-6">
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                            <div className="text-center sm:text-left">
-                                <h2 className="text-2xl font-bold text-[#172B4D] mb-1">
-                                    {percentage >= 70 ? "🎉 Great job!" : percentage >= 50 ? "👍 Good effort!" : "📚 Keep practicing!"}
-                                </h2>
-                                <p className="text-[#6B778C]">
-                                    You got {quizResults.correct_count} out of {quizResults.total_questions} questions correct
-                                </p>
+                    <div className="bg-white rounded-lg border border-[#DFE1E6] p-6 mb-6 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded bg-[#FAFBFC] border border-[#DFE1E6] flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-5 h-5 text-[#42526E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h2 className="text-sm font-semibold text-[#172B4D]">
+                                        Performance Overview
+                                    </h2>
+                                    <p className="text-sm text-[#6B778C]">
+                                        {quizResults.correct_count} of {quizResults.total_questions} questions correct • {percentage}% proficiency
+                                    </p>
+                                </div>
                             </div>
-                            <div className="flex gap-3">
-                                <Link
-                                    href={isGlobalMode ? "/dashboard" : `/study/${sessionId}`}
-                                    className="px-5 py-2.5 border border-[#DFE1E6] text-[#172B4D] rounded font-medium hover:bg-[#F4F5F7] transition-colors"
-                                >
-                                    {isGlobalMode ? "Dashboard" : "Back to Study"}
-                                </Link>
-                            </div>
+                            <Link
+                                href={isGlobalMode ? "/dashboard" : `/study/${sessionId}`}
+                                className="px-4 py-2 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center"
+                            >
+                                {isGlobalMode ? "Back to Dashboard" : "Return to Session"}
+                            </Link>
                         </div>
                     </div>
 
                     {/* Results List */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
+                        <h3 className="text-[10px] font-bold text-[#6B778C] uppercase tracking-wider mb-3">Question Breakdown</h3>
                         {quizResults.results.map((result, index) => (
                             <div
                                 key={result.question_id}
-                                className={`bg-white rounded-lg border ${result.evaluation_status === "pending" ? "border-[#DFE1E6]" :
-                                    result.correct ? "border-[#36B37E]" : "border-[#DE350B]"
-                                    } overflow-hidden`}
+                                className="bg-white rounded-lg border border-[#DFE1E6] border-l-4 border-l-[#0052CC] overflow-hidden"
                             >
                                 {/* Question Header */}
-                                <div className={`px-4 py-3 ${result.evaluation_status === "pending" ? "bg-[#F4F5F7]" :
-                                    result.correct ? "bg-[#E3FCEF]" : "bg-[#FFEBE6]"
-                                    }`}>
+                                <div className="px-4 py-3 bg-[#FAFBFC] border-b border-[#DFE1E6]">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium text-[#172B4D]">Q{index + 1}</span>
@@ -299,60 +352,64 @@ export default function QuizPage() {
                                                 {result.difficulty}
                                             </span>
                                         </div>
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 text-sm">
                                             {result.evaluation_status === "pending" ? (
-                                                <span className="flex items-center gap-1 text-[#6B778C] text-sm">
+                                                <span className="flex items-center gap-1 text-[#6B778C]">
                                                     <div className="animate-spin rounded-full h-3 w-3 border border-[#6B778C] border-t-transparent"></div>
-                                                    Evaluating...
-                                                </span>
-                                            ) : result.correct ? (
-                                                <span className="flex items-center gap-1 text-[#006644] font-medium">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                    </svg>
-                                                    Correct
+                                                    Evaluating
                                                 </span>
                                             ) : (
-                                                <span className="flex items-center gap-1 text-[#DE350B] font-medium">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                    </svg>
-                                                    Incorrect
+                                                <span className={`${result.correct ? "text-[#00875A]" : "text-[#DE350B]/60"} font-medium`}>
+                                                    {result.correct ? "Correct" : "Incorrect"}
                                                 </span>
                                             )}
                                             {result.new_leitner_box && (
-                                                <span className="text-xs text-[#6B778C]">→ Box {result.new_leitner_box}</span>
+                                                <span className="text-[10px] uppercase font-bold text-[#6B778C] tracking-wider ml-1">→ Box {result.new_leitner_box}</span>
                                             )}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Question Content */}
-                                <div className="p-4 space-y-3">
-                                    <p className="text-[#172B4D] font-medium">{result.question}</p>
+                                <div className="p-4 space-y-4">
+                                    <div className="prose max-w-none text-sm text-[#172B4D] font-medium">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.question}</ReactMarkdown>
+                                    </div>
 
-                                    <div className="grid gap-2 text-sm">
+                                    <div className="space-y-2 text-sm">
                                         <div className="flex gap-2">
                                             <span className="text-[#6B778C] w-24 flex-shrink-0">Your answer:</span>
-                                            <span className="text-[#172B4D]">{result.user_answer}</span>
+                                            <div className="prose max-w-none text-[#172B4D]">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.user_answer}</ReactMarkdown>
+                                            </div>
                                         </div>
                                         {!result.correct && result.evaluation_status === "completed" && (
                                             <div className="flex gap-2">
-                                                <span className="text-[#6B778C] w-24 flex-shrink-0">Correct:</span>
-                                                <span className="text-[#006644] font-medium">{result.correct_answer}</span>
+                                                <span className="text-[#6B778C] w-24 flex-shrink-0 font-medium">Correct Answer:</span>
+                                                <div className="prose max-w-none text-[#42526E]">
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.correct_answer}</ReactMarkdown>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
 
                                     {result.explanation && (
-                                        <div className="bg-[#F4F5F7] rounded p-3 text-sm text-[#42526E]">
-                                            {result.explanation}
+                                        <div className="bg-[#FAFBFC] border border-[#DFE1E6] rounded p-3 text-sm text-[#42526E]">
+                                            <div className="text-[10px] font-bold text-[#6B778C] uppercase tracking-wider mb-2">Explanation</div>
+                                            <div className="prose max-w-none">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {result.explanation}
+                                                </ReactMarkdown>
+                                            </div>
                                         </div>
                                     )}
 
                                     {result.feedback && (
-                                        <div className="bg-[#FFFAE6] border border-[#FFE380] rounded p-3 text-sm text-[#172B4D]">
-                                            💡 {result.feedback}
+                                        <div className="bg-[#F4F5F7] border border-[#DFE1E6] rounded p-3 text-sm text-[#172B4D]">
+                                            <div className="prose max-w-none">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {result.feedback}
+                                                </ReactMarkdown>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -379,7 +436,7 @@ export default function QuizPage() {
                         </Link>
                         <div className="flex items-center gap-2 sm:gap-4">
                             {isGlobalMode && (
-                                <span className="px-2 py-1 bg-[#DEEBFF] text-[#0747A6] rounded text-xs font-medium">
+                                <span className="px-2 py-1 bg-[#F4F5F7] text-[#42526E] border border-[#DFE1E6] rounded text-[10px] font-bold uppercase tracking-wider">
                                     Global Review
                                 </span>
                             )}
@@ -404,6 +461,26 @@ export default function QuizPage() {
             </header>
 
             <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                {error && (
+                    <div className="mb-6 p-4 bg-[#FFEBE6] border border-[#FF8F73] text-[#DE350B] rounded-lg flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="text-sm font-medium">{error}</span>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setError(null);
+                                loadQuestions();
+                            }}
+                            className="px-3 py-1 bg-white border border-[#FF8F73] rounded text-xs font-semibold hover:bg-[#FFF0B3] transition-colors"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                )}
+
                 {loadingQuestions ? (
                     <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 sm:p-12 text-center">
                         <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-2 border-[#0052CC] border-t-transparent mx-auto mb-4"></div>
@@ -420,18 +497,13 @@ export default function QuizPage() {
                             </>
                         ) : (
                             <>
-                                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[#DEEBFF] rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <svg className="w-6 h-6 sm:w-8 sm:h-8 text-[#0052CC]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                </div>
-                                <h2 className="text-xl sm:text-2xl font-bold text-[#172B4D] mb-2">All Questions Answered!</h2>
-                                <p className="text-[#6B778C] mb-6">
-                                    You've answered all {questions.length} questions. Click below to see your results.
+                                <h3 className="text-sm font-semibold text-[#172B4D] mb-1">Ready for Results</h3>
+                                <p className="text-xs text-[#6B778C] mb-6">
+                                    You've completed all {questions.length} questions.
                                 </p>
                                 <button
                                     onClick={fetchResults}
-                                    className="px-8 py-3 bg-[#0052CC] text-white rounded-lg font-medium hover:bg-[#0747A6] transition-colors text-lg"
+                                    className="px-6 py-2.5 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors"
                                 >
                                     View Results
                                 </button>
@@ -444,7 +516,7 @@ export default function QuizPage() {
                         <div className="p-4 sm:p-6 border-b border-[#DFE1E6]">
                             {/* Session context for global mode */}
                             {isGlobalMode && currentQuestion.session_title && (
-                                <div className="mb-3">
+                                <div className="mb-4">
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F4F5F7] text-[#6B778C] rounded text-xs font-medium">
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -453,20 +525,20 @@ export default function QuizPage() {
                                     </span>
                                 </div>
                             )}
-                            <div className="flex flex-wrap items-center gap-2 mb-3 sm:mb-4">
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(currentQuestion.question_type)}`}>
+                            <div className="flex items-center gap-2 mb-6">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getTypeColor(currentQuestion.question_type)}`}>
                                     {currentQuestion.question_type}
                                 </span>
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getDifficultyColor(currentQuestion.difficulty)}`}>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getDifficultyColor(currentQuestion.difficulty)}`}>
                                     {currentQuestion.difficulty}
                                 </span>
-                                <span className="px-2 py-0.5 bg-[#F4F5F7] text-[#6B778C] rounded text-xs font-medium">
+                                <span className="px-2 py-0.5 bg-[#F4F5F7] text-[#42526E] border border-[#DFE1E6] rounded text-[10px] font-bold uppercase tracking-wider">
                                     Box {currentQuestion.leitner_box}
                                 </span>
                             </div>
-                            <h2 className="text-base sm:text-lg font-medium text-[#172B4D] leading-relaxed">
-                                {currentQuestion.question}
-                            </h2>
+                            <div className="prose max-w-none text-sm font-medium text-[#172B4D] leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentQuestion.question}</ReactMarkdown>
+                            </div>
                         </div>
 
                         {/* Answer Input */}
@@ -495,6 +567,20 @@ export default function QuizPage() {
                                 )}
                                 {submitting ? "Submitting..." : currentIndex < questions.length - 1 ? "Submit & Next" : "Submit & Finish"}
                             </button>
+
+                            {/* Save & Evaluate Progress button - visible when at least one question answered */}
+                            {submittedAnswers.length > 0 && (
+                                <button
+                                    onClick={saveAndExit}
+                                    className="mt-3 w-full px-6 py-2.5 border border-[#DFE1E6] text-[#172B4D] rounded font-medium hover:bg-[#F4F5F7] transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                    </svg>
+                                    Save & Evaluate Progress ({submittedAnswers.length}/{questions.length})
+                                </button>
+                            )}
+
                             <p className="text-center text-xs text-[#6B778C] mt-2">
                                 Press ⌘+Enter to submit
                             </p>

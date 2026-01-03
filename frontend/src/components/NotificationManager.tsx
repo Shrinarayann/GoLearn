@@ -11,7 +11,20 @@ export default function NotificationManager() {
     const [permission, setPermission] = useState<NotificationPermission>("default");
     const [isRegistering, setIsRegistering] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
+    const [isDismissed, setIsDismissed] = useState(false);
     const lastRegisteredToken = useRef<string | null>(null);
+
+    useEffect(() => {
+        const dismissed = localStorage.getItem("notification_reminder_dismissed");
+        if (dismissed === "true") {
+            setIsDismissed(true);
+        }
+    }, []);
+
+    const handleDismiss = () => {
+        setIsDismissed(true);
+        localStorage.setItem("notification_reminder_dismissed", "true");
+    };
 
     const updatePermission = useCallback(() => {
         if ("Notification" in window) {
@@ -132,12 +145,22 @@ export default function NotificationManager() {
     };
 
     // Only show modal if permission not granted, or if there's an error/important status
-    // Don't show for transient registration status messages
-    const shouldShowModal = permission !== "granted" || (status && !isRegistering);
+    // Don't show if dismissed or for transient registration status messages
+    const shouldShowModal = !isDismissed && (permission !== "granted" || (status && !isRegistering));
 
     if (shouldShowModal) {
         return (
             <div className="fixed bottom-4 right-4 z-50 p-6 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 max-w-sm transition-all animate-in fade-in duration-500">
+                <button
+                    onClick={handleDismiss}
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                    aria-label="Close"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                     📢 Study Reminders
                 </h3>
