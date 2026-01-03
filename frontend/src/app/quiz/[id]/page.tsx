@@ -118,36 +118,33 @@ export default function QuizPage() {
         }
     };
 
-    const submitAnswer = async () => {
+    const submitAnswer = () => {
         if (!token || !answer.trim()) return;
 
         const currentQuestion = questions[currentIndex];
         setSubmitting(true);
 
-        try {
-            // Fire-and-forget submission
-            await api.submitAnswerAsync(token, currentQuestion.question_id, answer);
+        // Fire-and-forget submission - don't await!
+        api.submitAnswerAsync(token, currentQuestion.question_id, answer)
+            .catch(error => console.error("Failed to submit answer:", error));
 
-            // Track submitted answer locally (for global mode results)
-            setSubmittedAnswers(prev => [...prev, {
-                questionId: currentQuestion.question_id,
-                answer: answer,
-                sessionId: currentQuestion.session_id || sessionId
-            }]);
+        // Track submitted answer locally (for global mode results)
+        setSubmittedAnswers(prev => [...prev, {
+            questionId: currentQuestion.question_id,
+            answer: answer,
+            sessionId: currentQuestion.session_id || sessionId
+        }]);
 
-            // Move to next question immediately
-            if (currentIndex < questions.length - 1) {
-                setCurrentIndex(prev => prev + 1);
-                setAnswer("");
-            } else {
-                // All questions answered
-                setAllAnswered(true);
-            }
-        } catch (error) {
-            console.error("Failed to submit answer:", error);
-        } finally {
-            setSubmitting(false);
+        // Move to next question immediately
+        if (currentIndex < questions.length - 1) {
+            setCurrentIndex(prev => prev + 1);
+            setAnswer("");
+        } else {
+            // All questions answered
+            setAllAnswered(true);
         }
+
+        setSubmitting(false);
     };
 
     const fetchResults = async () => {
@@ -238,8 +235,8 @@ export default function QuizPage() {
                             <h1 className="text-xl font-bold text-[#172B4D]">Quiz Results</h1>
                             <div className="flex items-center gap-3">
                                 <span className={`px-4 py-2 rounded-lg text-lg font-bold ${percentage >= 70 ? "bg-[#E3FCEF] text-[#006644]" :
-                                        percentage >= 50 ? "bg-[#FFFAE6] text-[#FF8B00]" :
-                                            "bg-[#FFEBE6] text-[#DE350B]"
+                                    percentage >= 50 ? "bg-[#FFFAE6] text-[#FF8B00]" :
+                                        "bg-[#FFEBE6] text-[#DE350B]"
                                     }`}>
                                     {quizResults.correct_count}/{quizResults.total_questions} ({percentage}%)
                                 </span>
@@ -277,12 +274,12 @@ export default function QuizPage() {
                             <div
                                 key={result.question_id}
                                 className={`bg-white rounded-lg border ${result.evaluation_status === "pending" ? "border-[#DFE1E6]" :
-                                        result.correct ? "border-[#36B37E]" : "border-[#DE350B]"
+                                    result.correct ? "border-[#36B37E]" : "border-[#DE350B]"
                                     } overflow-hidden`}
                             >
                                 {/* Question Header */}
                                 <div className={`px-4 py-3 ${result.evaluation_status === "pending" ? "bg-[#F4F5F7]" :
-                                        result.correct ? "bg-[#E3FCEF]" : "bg-[#FFEBE6]"
+                                    result.correct ? "bg-[#E3FCEF]" : "bg-[#FFEBE6]"
                                     }`}>
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
