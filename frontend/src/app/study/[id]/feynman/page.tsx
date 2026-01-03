@@ -106,8 +106,9 @@ export default function FeynmanPage() {
         }
     };
 
-    const triggerEvaluation = async () => {
-        if (!token || !selectedTopic || messages.length < 4 || isEvaluating) return;
+    const triggerEvaluation = async (currentMessages?: Message[]) => {
+        const msgsToEvaluate = currentMessages || messages;
+        if (!token || !selectedTopic || msgsToEvaluate.length < 4 || isEvaluating) return;
 
         setIsEvaluating(true);
         try {
@@ -146,7 +147,8 @@ export default function FeynmanPage() {
             // Auto-trigger evaluation every 5 user messages
             const userMessageCount = messages.filter(m => m.role === 'user').length + 1;
             if (userMessageCount >= 5 && userMessageCount % 5 === 0) {
-                triggerEvaluation();
+                // Pass current messages to avoid stale state in rapid succession
+                triggerEvaluation([...messages, { role: "user", text: userMsg }, { role: "agent", text: result.response }]);
             }
         } catch (err) {
             console.error("Feynman chat failed:", err);
@@ -196,30 +198,44 @@ export default function FeynmanPage() {
                             </div>
                         </div>
                     </div>
-                    {/* Voice/Text Mode Toggle */}
-                    <button
-                        onClick={() => setIsVoiceMode(!isVoiceMode)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isVoiceMode
-                            ? "bg-[#6554C0] text-white hover:bg-[#5243AA]"
-                            : "bg-[#F4F5F7] text-[#172B4D] hover:bg-[#EBECF0]"
-                            }`}
-                    >
-                        {isVoiceMode ? (
-                            <>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                Text Mode
-                            </>
-                        ) : (
-                            <>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                                </svg>
-                                Voice Mode
-                            </>
-                        )}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Manual Evaluation Button */}
+                        <button
+                            onClick={() => triggerEvaluation()}
+                            disabled={messages.length < 4 || isEvaluating}
+                            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#36B37E] text-white hover:bg-[#2D9469] disabled:opacity-50 transition-all"
+                            title="Evaluate your progress so far"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Evaluate Me
+                        </button>
+                        {/* Voice/Text Mode Toggle */}
+                        <button
+                            onClick={() => setIsVoiceMode(!isVoiceMode)}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isVoiceMode
+                                ? "bg-[#6554C0] text-white hover:bg-[#5243AA]"
+                                : "bg-[#F4F5F7] text-[#172B4D] hover:bg-[#EBECF0]"
+                                }`}
+                        >
+                            {isVoiceMode ? (
+                                <>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    Text
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                    </svg>
+                                    Voice
+                                </>
+                            )}
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -233,7 +249,18 @@ export default function FeynmanPage() {
                             token={token}
                             initialHistory={messages}
                             onTranscript={(text, role) => {
-                                setMessages(prev => [...prev, { role, text }]);
+                                setMessages(prev => {
+                                    const newMessages = [...prev, { role, text }];
+                                    // Trigger evaluation if this completed a turn (agent responded)
+                                    // and we have enough messages
+                                    if (role === 'agent' && text.length > 10) {
+                                        const userMsgs = newMessages.filter(m => m.role === 'user');
+                                        if (userMsgs.length >= 5 && userMsgs.length % 5 === 0) {
+                                            triggerEvaluation(newMessages);
+                                        }
+                                    }
+                                    return newMessages;
+                                });
                             }}
                         />
                     )}

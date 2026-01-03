@@ -57,7 +57,7 @@ _comprehension_runner = Runner(
     session_service=_session_service
 )
 
-llm = genai.GenerativeModel("gemini-1.5-flash")
+llm = genai.GenerativeModel("gemini-2.5-flash-lite")
 
 # Create the ADK Runner for Feynman
 _feynman_runner = Runner(
@@ -601,7 +601,16 @@ def _parse_json_response(text: str, agent_name: str = "unknown") -> dict:
         except json.JSONDecodeError:
             pass
     
-    logger.warning(f"{agent_name} JSON parse failed. Raw text: {original_text[:500]}...")
+    logger.warning(f"{agent_name} JSON parse failed. Raw text: {original_text[:1000]}...")
+    
+    # Final desperate attempt: Look for anything looks like "score": X
+    score_match = re.search(r'"score":\s*(\d+)', text)
+    if score_match:
+        # Also try to extract feedback if it exists
+        feedback_match = re.search(r'"feedback":\s*"([^"]*)"', text)
+        feedback = feedback_match.group(1) if feedback_match else "Evaluation parsed from raw text."
+        return {"score": int(score_match.group(1)), "feedback": feedback}
+        
     return {"raw_response": original_text, "parse_error": True}
 
 
@@ -771,19 +780,38 @@ async def evaluate_mastery(
     Conversation Transcript:
     {transcript_str}
     
-    Based on the clarity, accuracy, and simplicity of the user's explanations, provide:
-    1. A mastery score from 0 to 100.
-    2. Brief, constructive feedback on what they explained well and what gaps remain.
+
+    Based on the clarity, accuracy, and simplicity of the user's explanations, calculate a mastery score.
+    
+    Use this strict weighted rubric (Total 100):
+    1. ACCURACY (40 points): Are the facts correct against the study context?
+    2. SIMPLICITY (40 points): Is it explained without jargon? Are there analogies?
+    3. COVERAGE (20 points): How much of the specified topic was actually covered?
+    
+    Scoring Tiers:
+    - 0-30: Major inaccuracies or extremely vague.
+    - 31-60: High-level understanding but heavy jargon or missing core "why".
+    - 61-85: Solid explanation, good analogies, mostly accurate.
+    - 86-100: Flawless simplicity, zero jargon, identifies all subtle logical gaps.
+    
+    IMPORTANT: Evaluate the *depth* of the teaching. If the user only gives one-sentence answers, do not give a score above 40.
     
     Return ONLY a JSON object:
     {{
-        "score": 85,
-        "feedback": "Your explanation of [Concept] was excellent and used great analogies. However, you seemed a bit vague on [Sub-topic]..."
+        "reasoning": "A brief 2-sentence internal justification for the score components",
+        "score": <calculated_int_score>,
+        "feedback": "..."
     }}
     """
     
     try:
-        response = llm.generate_content(prompt)
+        response = llm.generate_content(
+            prompt,
+            generation_config={
+                "response_mime_type": "application/json",
+                "temperature": 0.0
+            }
+        )
         result = _parse_json_response(response.text, "mastery_evaluator")
         
         # Ensure score is an int
@@ -798,4 +826,7 @@ async def evaluate_mastery(
         return result
     except Exception as e:
         logger.error(f"Mastery evaluation failed: {e}")
-        return {"score": 0, "feedback": "Evaluation failed. Try teaching more!"}
+        return {
+            "score": 0, 
+            "feedback": f"Evaluation failed. Try teaching more!"
+        }

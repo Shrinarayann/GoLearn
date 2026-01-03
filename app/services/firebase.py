@@ -337,9 +337,10 @@ class FirestoreService:
         """Update the mastery score for a specific topic in a Feynman session."""
         session_ref = self.db.collection("study_sessions").document(session_id)
         
-        # Use a nested field update to avoid overwriting other topics
-        # Structure: feynman_mastery: { topic: { score: int, updated_at: datetime } }
-        update_path = f"feynman_mastery.{topic}"
+        # Use a safe key to avoid dots in Firestore map keys (which update interpreted as paths)
+        safe_topic = topic.replace(".", "_dot_")
+        update_path = f"feynman_mastery.{safe_topic}"
+        
         session_ref.update({
             update_path: {
                 "score": score,
