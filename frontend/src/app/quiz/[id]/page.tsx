@@ -94,7 +94,8 @@ export default function QuizPage() {
                 setQuestions(data);
                 setLoadingQuestions(false);
             } else {
-                const data = await api.getQuestions(token, sessionId, isReviewMode);
+                // Use resume=true to load unattempted questions first
+                const data = await api.getQuestions(token, sessionId, isReviewMode, true);
                 if (data.length > 0) {
                     setQuestions(data);
                     setLoadingQuestions(false);
@@ -153,6 +154,13 @@ export default function QuizPage() {
         }
 
         setSubmitting(false);
+    };
+
+    // Save progress and show partial results
+    const saveAndExit = async () => {
+        if (!token || submittedAnswers.length === 0) return;
+        setAllAnswered(true);
+        await fetchResults();
     };
 
     const fetchResults = async () => {
@@ -495,6 +503,20 @@ export default function QuizPage() {
                                 )}
                                 {submitting ? "Submitting..." : currentIndex < questions.length - 1 ? "Submit & Next" : "Submit & Finish"}
                             </button>
+
+                            {/* Save & Evaluate Progress button - visible when at least one question answered */}
+                            {submittedAnswers.length > 0 && (
+                                <button
+                                    onClick={saveAndExit}
+                                    className="mt-3 w-full px-6 py-2.5 border border-[#DFE1E6] text-[#172B4D] rounded font-medium hover:bg-[#F4F5F7] transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                    </svg>
+                                    Save & Evaluate Progress ({submittedAnswers.length}/{questions.length})
+                                </button>
+                            )}
+
                             <p className="text-center text-xs text-[#6B778C] mt-2">
                                 Press ⌘+Enter to submit
                             </p>

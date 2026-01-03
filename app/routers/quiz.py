@@ -265,11 +265,13 @@ async def generate_quiz(
 async def get_questions(
     session_id: str,
     due_only: bool = False,
+    resume: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
     """
     Get all questions for a session.
     If due_only=True, returns only questions due for review based on Leitner schedule.
+    If resume=True, sorts questions so unattempted ones come first (ordered by leitner_box).
     """
     # Verify session
     session = await db.get_session(session_id)
@@ -329,6 +331,16 @@ async def get_questions(
             )
             for q in due_questions
         ]
+
+    # Apply resume sorting: unattempted questions first, then by leitner_box
+    if resume:
+        # Separate unattempted and attempted questions
+        unattempted = [q for q in questions if not q.get("user_answer")]
+        attempted = [q for q in questions if q.get("user_answer")]
+        # Sort unattempted by leitner_box (box 1 first = lowest difficulty)
+        unattempted.sort(key=lambda x: x.get("leitner_box", 1))
+        # Combine: unattempted first, then attempted
+        questions = unattempted + attempted
 
     return [
         QuestionResponse(

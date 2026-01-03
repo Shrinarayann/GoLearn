@@ -211,8 +211,11 @@ class ApiClient {
         });
     }
 
-    async getQuestions(token: string, sessionId: string, dueOnly: boolean = false) {
-        const url = `/quiz/sessions/${sessionId}/questions${dueOnly ? "?due_only=true" : ""}`;
+    async getQuestions(token: string, sessionId: string, dueOnly: boolean = false, resume: boolean = false) {
+        const params = new URLSearchParams();
+        if (dueOnly) params.append("due_only", "true");
+        if (resume) params.append("resume", "true");
+        const query = params.toString() ? `?${params.toString()}` : "";
         return this.request<Array<{
             question_id: string;
             question: string;
@@ -222,7 +225,7 @@ class ApiClient {
             stability: number;
             fsrs_difficulty: number;
             leitner_box: number;
-        }>>(url, { token });
+        }>>(`/quiz/sessions/${sessionId}/questions${query}`, { token });
     }
 
     async submitAnswer(token: string, questionId: string, answer: string) {
