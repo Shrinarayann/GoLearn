@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import Link from "next/link";
 import PomodoroTimer from "@/components/PomodoroTimer";
 import ExamUploadModal from "@/components/ExamUploadModal";
+import ChatButton from "@/components/ChatButton";
 
 interface SessionData {
     session_id: string;
@@ -498,6 +499,11 @@ export default function StudySessionPage() {
                 onClose={() => setShowExamModal(false)}
                 sessionId={sessionId}
             />
+
+            {/* Floating Chat Button */}
+            {session && (session.status === 'ready' || session.status === 'quizzing') && (
+                <ChatButton sessionId={sessionId} />
+            )}
         </div>
     );
 }

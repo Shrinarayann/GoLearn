@@ -21,6 +21,7 @@ from ..services.agent_service import (
     generate_questions,
 )
 from ..services.fsrs import FSRS
+from ..services.rag_service import index_session_content
 import logging
 
 router = APIRouter()
@@ -249,9 +250,21 @@ async def comprehension_event_generator(
                     application_result=results.get("application", {})
                 )
             except Exception as quiz_error:
-                # Log error but don't fail the comprehension
-                import logging
-                logging.error(f"Quiz pre-generation failed for {session_id}: {quiz_error}")
+                logger.error(f"Quiz pre-generation failed for {session_id}: {quiz_error}")
+            
+            # Index content for RAG chatbot
+            try:
+                await index_session_content(
+                    session_id=session_id,
+                    raw_content=extracted_text,
+                    exploration_result=results.get("exploration", {}),
+                    engagement_result=results.get("engagement", {}),
+                    application_result=results.get("application", {}),
+                    db=db
+                )
+                logger.info(f"[RAG] Indexed content for session {session_id}")
+            except Exception as rag_error:
+                logger.error(f"RAG indexing failed for {session_id}: {rag_error}")
         else:
             await db.update_session(session_id, {"status": "error"})
             yield f"data: {json.dumps({'phase': 'error', 'message': 'All phases failed'})}\n\n"

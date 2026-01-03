@@ -364,3 +364,63 @@ class FirestoreService:
             }
         })
 
+    # --- RAG Chunks ---
+    
+    async def create_rag_chunk(self, session_id: str, chunk_data: dict) -> str:
+        """Create a RAG chunk with embedding for a session."""
+        doc_ref = self.db.collection("rag_chunks").document()
+        chunk_data["chunk_id"] = doc_ref.id
+        doc_ref.set(chunk_data)
+        return doc_ref.id
+    
+    async def get_rag_chunks(self, session_id: str) -> List[dict]:
+        """Get all RAG chunks for a session."""
+        docs = (
+            self.db.collection("rag_chunks")
+            .where("session_id", "==", session_id)
+            .stream()
+        )
+        chunks = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["chunk_id"] = doc.id
+            chunks.append(data)
+        return chunks
+    
+    async def delete_rag_chunks(self, session_id: str) -> None:
+        """Delete all RAG chunks for a session."""
+        docs = (
+            self.db.collection("rag_chunks")
+            .where("session_id", "==", session_id)
+            .stream()
+        )
+        batch = self.db.batch()
+        count = 0
+        for doc in docs:
+            batch.delete(doc.reference)
+            count += 1
+            if count >= 400:
+                batch.commit()
+                batch = self.db.batch()
+                count = 0
+        if count > 0:
+            batch.commit()
+    
+    # --- Chat Messages ---
+    
+    async def add_chat_message(self, session_id: str, message: dict) -> None:
+        """Add a chat message to a session's chat history."""
+        message["timestamp"] = datetime.utcnow()
+        self.db.collection("study_sessions").document(session_id).update({
+            "chat_messages": firestore.ArrayUnion([message])
+        })
+    
+    async def get_chat_history(self, session_id: str, limit: int = 20) -> List[dict]:
+        """Get chat history for a session (most recent messages)."""
+        doc = self.db.collection("study_sessions").document(session_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            messages = data.get("chat_messages", [])
+            # Return last N messages
+            return messages[-limit:] if len(messages) > limit else messages
+        return []

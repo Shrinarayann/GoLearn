@@ -1,0 +1,59 @@
+.button {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    z-index: 1001;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.button:hover {
+    transform: scale(1.08);
+    box-shadow: 0 12px 40px rgba(102, 126, 234, 0.5);
+}
+
+.button:active {
+    transform: scale(0.95);
+}
+
+.active {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.button svg {
+    transition: transform 0.3s ease;
+}
+
+.active svg {
+    transform: rotate(90deg);
+}
+
+/* Pulse animation for attention */
+@keyframes pulse {
+    0% {
+        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.7),
+            0 0 0 8px rgba(102, 126, 234, 0.1);
+    }
+
+    100% {
+        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+    }
+}
+
+.button:not(.active) {
+    animation: pulse 3s infinite;
+}
