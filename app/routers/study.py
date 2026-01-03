@@ -41,6 +41,15 @@ class SessionResponse(BaseModel):
     application_result: Optional[dict] = None
 
 
+class SessionListItem(BaseModel):
+    """Lightweight session item for list view (no comprehension data)."""
+    session_id: str
+    title: str
+    status: str
+    created_at: datetime
+    enable_spaced_repetition: bool = True
+
+
 class ComprehensionRequest(BaseModel):
     """Request to run comprehension on content."""
     content: Optional[str] = None  # If not provided, will use stored content
@@ -85,22 +94,17 @@ async def create_session(
     )
 
 
-@router.get("/sessions", response_model=List[SessionResponse])
+@router.get("/sessions", response_model=List[SessionListItem])
 async def list_sessions(current_user: dict = Depends(get_current_user)):
-    """List all study sessions for the current user."""
-    sessions = await db.get_user_sessions(current_user["user_id"])
+    """List all study sessions for the current user (lightweight, no comprehension data)."""
+    sessions = await db.get_user_sessions_summary(current_user["user_id"])
     return [
-        SessionResponse(
+        SessionListItem(
             session_id=s["session_id"],
-            user_id=s["user_id"],
             title=s["title"],
             status=s["status"],
             created_at=s["created_at"],
-            enable_spaced_repetition=s.get("enable_spaced_repetition", True),  # Default True for existing sessions
-            pdf_filename=s.get("pdf_filename"),
-            exploration_result=s.get("exploration_result"),
-            engagement_result=s.get("engagement_result"),
-            application_result=s.get("application_result"),
+            enable_spaced_repetition=s.get("enable_spaced_repetition", True),
         )
         for s in sessions
     ]

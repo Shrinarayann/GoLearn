@@ -7,12 +7,17 @@ from typing import List
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from ..dependencies import get_current_user
 from ..services.firebase import FirestoreService
 
 router = APIRouter()
 db = FirestoreService()
+
+# Thread pool for parallel Firestore queries
+executor = ThreadPoolExecutor(max_workers=10)
 
 
 # --- Schemas ---
@@ -41,110 +46,41 @@ class DashboardData(BaseModel):
     sessions_progress: List[SessionProgress]
 
 
-# --- Routes ---
-
-@router.get("/data", response_model=DashboardData)
-async def get_dashboard_data(
-    current_user: dict = Depends(get_current_user)
-):
+def _fetch_question_stats_for_batch(session_ids: List[str], sr_enabled_sessions: set) -> dict:
     """
-    Get all dashboard data in a single optimized request.
-    Returns sessions summary, global progress, and per-session progress.
+    Fetch only the fields needed for stats calculation (runs in thread pool).
+    Returns aggregated stats for the batch.
     """
-    user_id = current_user["user_id"]
+    if not session_ids:
+        return {"questions": [], "stats": {}}
     
-    # Get all user sessions (lightweight - no comprehension results)
-    sessions = await db.get_user_sessions(user_id)
-    
-    # Build session summaries (only essential fields)
-    session_summaries = [
-        SessionSummary(
-            session_id=s["session_id"],
-            title=s["title"],
-            status=s["status"],
-            created_at=s["created_at"],
-            enable_spaced_repetition=s.get("enable_spaced_repetition", True),  # Default True
-        )
-        for s in sessions
-    ]
-    
-    # If no sessions, return early
-    if not sessions:
-        return DashboardData(
-            sessions=session_summaries,
-            global_progress={
-                "total_due": 0,
-                "total_concepts": 0,
-                "overall_mastery_percentage": 0.0,
-            },
-            sessions_progress=[]
-        )
-    
-    # Build map of SR-enabled session IDs
-    sr_enabled_sessions = {
-        s["session_id"] for s in sessions 
-        if s.get("enable_spaced_repetition", True)
-    }
-    
-    # Get all questions for the user (pass sessions to avoid duplicate query)
-    session_map = {s["session_id"]: s.get("title", "Untitled") for s in sessions}
-    session_ids = list(session_map.keys())
-    
-    # Fetch all questions in batches
-    all_questions = []
-    batch_size = 10
-    
-    for i in range(0, len(session_ids), batch_size):
-        batch_session_ids = session_ids[i:i + batch_size]
-        query = (
-            db.db.collection("quiz_questions")
-            .where("session_id", "in", batch_session_ids)
-        )
-        
-        docs = query.stream()
-        for doc in docs:
-            data = doc.to_dict()
-            data["question_id"] = doc.id
-            data["session_title"] = session_map.get(data["session_id"], "Unknown")
-            all_questions.append(data)
-    
-    # Calculate global and per-session stats in a single pass
-    total_concepts = len(all_questions)
-    total_due = 0
-    total_mastered = 0
     now = datetime.utcnow() + timedelta(seconds=5)
     
-    # Build per-session stats
-    session_stats = {}
-    for session_id in session_ids:
-        session_stats[session_id] = {
-            "session_id": session_id,
-            "due_count": 0,
-            "total": 0,
-            "mastered": 0,
-        }
+    # Only fetch the 3 fields we need: session_id, leitner_box, next_review_at
+    query = (
+        db.db.collection("quiz_questions")
+        .where("session_id", "in", session_ids)
+        .select(["session_id", "leitner_box", "next_review_at"])
+    )
     
-    # Process each question
-    for q in all_questions:
-        session_id = q.get("session_id")
+    stats = {sid: {"total": 0, "mastered": 0, "due": 0} for sid in session_ids}
+    
+    for doc in query.stream():
+        data = doc.to_dict()
+        session_id = data.get("session_id")
         
-        # Update session total
-        if session_id in session_stats:
-            session_stats[session_id]["total"] += 1
+        if session_id not in stats:
+            continue
+            
+        stats[session_id]["total"] += 1
         
-        # Check if mastered (box 5)
-        if q.get("leitner_box", 1) == 5:
-            total_mastered += 1
-            if session_id in session_stats:
-                session_stats[session_id]["mastered"] += 1
+        # Check mastery (box 5)
+        if data.get("leitner_box", 1) == 5:
+            stats[session_id]["mastered"] += 1
         
         # Check if due (only for SR-enabled sessions)
-        # For SR-disabled sessions, next_review_at is None but should not count as due
-        if session_id not in sr_enabled_sessions:
-            # Skip due calculation for SR-disabled sessions
-            pass
-        else:
-            review_date = q.get("next_review_at")
+        if session_id in sr_enabled_sessions:
+            review_date = data.get("next_review_at")
             is_due = False
             
             if review_date is None:
@@ -161,24 +97,94 @@ async def get_dashboard_data(
                     is_due = True
             
             if is_due:
-                total_due += 1
-                if session_id in session_stats:
-                    session_stats[session_id]["due_count"] += 1
+                stats[session_id]["due"] += 1
     
-    # Calculate overall mastery percentage
+    return stats
+
+
+# --- Routes ---
+
+@router.get("/data", response_model=DashboardData)
+async def get_dashboard_data(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all dashboard data in a single optimized request.
+    Uses parallel queries and field selection for maximum speed.
+    """
+    user_id = current_user["user_id"]
+    
+    # Get lightweight session summaries (excludes exploration/engagement/application results)
+    sessions = await db.get_user_sessions_summary(user_id)
+    
+    # Build session summaries (only essential fields)
+    session_summaries = [
+        SessionSummary(
+            session_id=s["session_id"],
+            title=s["title"],
+            status=s["status"],
+            created_at=s["created_at"],
+            enable_spaced_repetition=s.get("enable_spaced_repetition", True),
+        )
+        for s in sessions
+    ]
+    
+    # If no sessions, return early
+    if not sessions:
+        return DashboardData(
+            sessions=session_summaries,
+            global_progress={
+                "total_due": 0,
+                "total_concepts": 0,
+                "overall_mastery_percentage": 0.0,
+            },
+            sessions_progress=[]
+        )
+    
+    # Build set of SR-enabled session IDs
+    sr_enabled_sessions = {
+        s["session_id"] for s in sessions 
+        if s.get("enable_spaced_repetition", True)
+    }
+    
+    session_ids = [s["session_id"] for s in sessions]
+    
+    # Split into batches of 10 (Firestore "in" query limit)
+    batch_size = 10
+    batches = [session_ids[i:i + batch_size] for i in range(0, len(session_ids), batch_size)]
+    
+    # Run all batch queries in parallel using thread pool
+    loop = asyncio.get_event_loop()
+    tasks = [
+        loop.run_in_executor(executor, _fetch_question_stats_for_batch, batch, sr_enabled_sessions)
+        for batch in batches
+    ]
+    
+    batch_results = await asyncio.gather(*tasks)
+    
+    # Merge results from all batches
+    all_stats = {}
+    for batch_stats in batch_results:
+        all_stats.update(batch_stats)
+    
+    # Calculate global totals
+    total_concepts = sum(s["total"] for s in all_stats.values())
+    total_due = sum(s["due"] for s in all_stats.values())
+    total_mastered = sum(s["mastered"] for s in all_stats.values())
+    
     overall_mastery = (total_mastered / total_concepts * 100) if total_concepts > 0 else 0
     
     # Build per-session progress list
-    sessions_progress = []
-    for stats in session_stats.values():
-        if stats["total"] > 0:
-            mastery_pct = (stats["mastered"] / stats["total"] * 100) if stats["total"] > 0 else 0
-            sessions_progress.append(SessionProgress(
-                session_id=stats["session_id"],
-                due_count=stats["due_count"],
-                total=stats["total"],
-                mastery_percentage=round(mastery_pct, 1)
-            ))
+    sessions_progress = [
+        SessionProgress(
+            session_id=session_id,
+            due_count=stats["due"],
+            total=stats["total"],
+            mastery_percentage=round((stats["mastered"] / stats["total"] * 100) if stats["total"] > 0 else 0, 1)
+        )
+        for session_id, stats in all_stats.items()
+        if stats["total"] > 0
+    ]
     
     return DashboardData(
         sessions=session_summaries,
