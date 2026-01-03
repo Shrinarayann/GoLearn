@@ -205,6 +205,8 @@ class ApiClient {
             stability: number;
             fsrs_difficulty: number;
             leitner_box: number;
+            user_answer?: string;
+            session_id?: string;
         }>>(`/quiz/sessions/${sessionId}/generate`, {
             method: "POST",
             token,
@@ -225,6 +227,8 @@ class ApiClient {
             stability: number;
             fsrs_difficulty: number;
             leitner_box: number;
+            user_answer?: string;
+            session_id?: string;
         }>>(`/quiz/sessions/${sessionId}/questions${query}`, { token });
     }
 
@@ -300,6 +304,7 @@ class ApiClient {
             leitner_box: number;
             session_id: string;
             session_title: string;
+            user_answer?: string;
         }>>("/quiz/questions/global", { token });
     }
 

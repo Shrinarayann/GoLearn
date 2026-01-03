@@ -51,3 +51,68 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--neutral-100);
 }
+
+/* Markdown Rendering Styles */
+.prose {
+  line-height: 1.5;
+  color: inherit;
+}
+
+.prose p {
+  margin-bottom: 0.5rem;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose code {
+  background: var(--neutral-20);
+  padding: 0.1rem 0.2rem;
+  border-radius: 2px;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+  color: #42526E;
+}
+
+.prose pre {
+  background: #FAFBFC;
+  border: 1px solid var(--neutral-30);
+  padding: 0.75rem;
+  border-radius: 3px;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  border: none;
+}
+
+.prose ul,
+.prose ol {
+  margin-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose li {
+  margin-bottom: 0.25rem;
+}
+
+.prose strong {
+  font-weight: 600;
+  color: inherit;
+}
+
+.prose a {
+  color: var(--primary-light);
+  text-decoration: none;
+  border-bottom: 1px solid var(--primary-light);
+}
+
+.prose a:hover {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
