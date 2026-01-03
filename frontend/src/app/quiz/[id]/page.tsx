@@ -12,8 +12,8 @@ interface Question {
     question_type: string;
     difficulty: string;
     concept: string;
-    stability: number;
-    fsrs_difficulty: number;
+    stability?: number;
+    fsrs_difficulty?: number;
     leitner_box: number;
     session_id?: string;
     session_title?: string;
@@ -264,7 +264,7 @@ export default function QuizPage() {
                                     {currentQuestion.difficulty}
                                 </span>
                                 <span className="px-2 py-0.5 bg-[#F4F5F7] text-[#6B778C] rounded text-xs font-medium">
-                                    Box {getStabilityBox(currentQuestion.stability)}
+                                    Box {currentQuestion.leitner_box}
                                 </span>
                             </div>
                             <h2 className="text-base sm:text-lg font-medium text-[#172B4D] leading-relaxed">
@@ -313,7 +313,7 @@ export default function QuizPage() {
                                             <span className={`font-semibold ${result.correct ? "text-[#006644]" : "text-[#DE350B]"}`}>
                                                 {result.correct ? "Correct!" : "Incorrect"}
                                             </span>
-                                            <span className="text-xs sm:text-sm text-[#6B778C]">→ Box {getStabilityBox(result.new_stability)}</span>
+                                            <span className="text-xs sm:text-sm text-[#6B778C]">→ Box {result.correct ? Math.min(currentQuestion.leitner_box + 1, 5) : 1}</span>
                                         </div>
                                         {!result.correct && (
                                             <p className="text-[#172B4D] text-sm">
