@@ -98,11 +98,11 @@ export default function DashboardPage() {
 
     const getStatusBadge = (status: string) => {
         const styles: Record<string, string> = {
-            created: "bg-[#E3FCEF] text-[#006644]",
+            created: "bg-[#DFE1E6] text-[#42526E]",
             uploaded: "bg-[#DEEBFF] text-[#0747A6]",
-            comprehending: "bg-[#FFFAE6] text-[#FF8B00]",
-            ready: "bg-[#36B37E] text-white",
-            quizzing: "bg-[#6554C0] text-white",
+            comprehending: "bg-[#FFFAE6] text-[#974F0C]",
+            ready: "bg-[#E3FCEF] text-[#006644]",
+            quizzing: "bg-[#DEEBFF] text-[#0747A6]",
         };
         const labels: Record<string, string> = {
             created: "New",
@@ -172,35 +172,37 @@ export default function DashboardPage() {
                 {/* Global Review Center */}
                 {globalProgress && globalProgress.total_due > 0 && (
                     <div className="mb-6 sm:mb-8">
-                        <div className="bg-gradient-to-r from-[#0052CC] to-[#6554C0] rounded-lg shadow-lg p-6 sm:p-8 text-white">
+                        <div className="bg-white rounded-lg border border-[#DFE1E6] p-6 sm:p-8">
                             <div className="flex items-start justify-between gap-4 mb-4">
                                 <div>
                                     <div className="flex items-center gap-2 mb-2">
-                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        <h3 className="text-lg sm:text-xl font-semibold">Global Review</h3>
+                                        <div className="w-8 h-8 bg-[#DEEBFF] rounded flex items-center justify-center">
+                                            <svg className="w-5 h-5 text-[#0052CC]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                        </div>
+                                        <h3 className="text-lg sm:text-xl font-semibold text-[#172B4D]">Global Review</h3>
                                     </div>
-                                    <p className="text-white/90 text-sm sm:text-base">Review questions from all your sessions</p>
+                                    <p className="text-[#6B778C] text-sm sm:text-base">Review questions from all your sessions</p>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
-                                <div>
-                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.total_due}</div>
-                                    <div className="text-white/80 text-xs sm:text-sm">Cards Due</div>
+                                <div className="bg-[#F4F5F7] rounded-lg p-4">
+                                    <div className="text-2xl sm:text-3xl font-bold text-[#0052CC] mb-1">{globalProgress.total_due}</div>
+                                    <div className="text-[#6B778C] text-xs sm:text-sm">Cards Due</div>
                                 </div>
-                                <div>
-                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.total_concepts}</div>
-                                    <div className="text-white/80 text-xs sm:text-sm">Total Cards</div>
+                                <div className="bg-[#F4F5F7] rounded-lg p-4">
+                                    <div className="text-2xl sm:text-3xl font-bold text-[#172B4D] mb-1">{globalProgress.total_concepts}</div>
+                                    <div className="text-[#6B778C] text-xs sm:text-sm">Total Cards</div>
                                 </div>
-                                <div className="col-span-2 sm:col-span-1">
-                                    <div className="text-3xl sm:text-4xl font-bold mb-1">{globalProgress.overall_mastery_percentage}%</div>
-                                    <div className="text-white/80 text-xs sm:text-sm">Mastery</div>
+                                <div className="col-span-2 sm:col-span-1 bg-[#F4F5F7] rounded-lg p-4">
+                                    <div className="text-2xl sm:text-3xl font-bold text-[#36B37E] mb-1">{globalProgress.overall_mastery_percentage}%</div>
+                                    <div className="text-[#6B778C] text-xs sm:text-sm">Mastery</div>
                                 </div>
                             </div>
                             <Link
                                 href="/quiz/global?mode=global"
-                                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white text-[#0052CC] rounded-lg font-semibold hover:bg-white/90 transition-colors w-full sm:w-auto"
+                                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors w-full sm:w-auto"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -287,7 +289,7 @@ export default function DashboardPage() {
                                                 </span>
                                                 <Link
                                                     href={`/quiz/${session.session_id}?mode=review`}
-                                                    className="px-3 py-1.5 bg-[#FF8B00] text-white rounded text-xs font-medium hover:bg-[#FF991F] transition-colors"
+                                                    className="px-3 py-1.5 bg-[#DEEBFF] text-[#0747A6] rounded text-xs font-medium hover:bg-[#B3D4FF] transition-colors"
                                                 >
                                                     Review Now
                                                 </Link>
@@ -359,7 +361,7 @@ export default function DashboardPage() {
                                                         {hasDue && (
                                                             <Link
                                                                 href={`/quiz/${session.session_id}?mode=review`}
-                                                                className="px-3 py-1.5 bg-[#FF8B00] text-white rounded text-xs font-medium hover:bg-[#FF991F] transition-colors"
+                                                                className="px-3 py-1.5 bg-[#DEEBFF] text-[#0747A6] rounded text-xs font-medium hover:bg-[#B3D4FF] transition-colors"
                                                             >
                                                                 Review
                                                             </Link>

@@ -143,7 +143,7 @@ export default function QuizPage() {
     const getDifficultyColor = (diff: string) => {
         switch (diff) {
             case "easy": return "bg-[#E3FCEF] text-[#006644]";
-            case "medium": return "bg-[#FFFAE6] text-[#FF8B00]";
+            case "medium": return "bg-[#FFFAE6] text-[#974F0C]";
             case "hard": return "bg-[#FFEBE6] text-[#DE350B]";
             default: return "bg-[#F4F5F7] text-[#6B778C]";
         }
@@ -181,12 +181,12 @@ export default function QuizPage() {
                         </Link>
                         <div className="flex items-center gap-2 sm:gap-4">
                             {isGlobalMode && (
-                                <span className="px-2 py-1 bg-gradient-to-r from-[#0052CC] to-[#6554C0] text-white rounded text-xs font-medium">
+                                <span className="px-2 py-1 bg-[#DEEBFF] text-[#0747A6] rounded text-xs font-medium">
                                     Global Review
                                 </span>
                             )}
                             {isReviewMode && !isGlobalMode && (
-                                <span className="px-2 py-1 bg-[#FF8B00] text-white rounded text-xs font-medium">
+                                <span className="px-2 py-1 bg-[#DEEBFF] text-[#0747A6] rounded text-xs font-medium">
                                     Review Mode
                                 </span>
                             )}

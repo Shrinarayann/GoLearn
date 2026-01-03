@@ -198,7 +198,7 @@ export default function StudySessionPage() {
                                 <span className="sm:hidden">← Back</span>
                             </Link>
                             <span className="text-[#DFE1E6] hidden sm:inline">|</span>
-                            <h1 className="text-base sm:text-lg font-semibold text-[#172B4D] truncate">
+                            <h1 className="text-base sm:text-lg font-medium text-[#172B4D] truncate">
                                 {session?.title || "Loading..."}
                             </h1>
                         </div>
@@ -250,9 +250,9 @@ export default function StudySessionPage() {
                                     </button>
                                 )}
 
-                                <Link href={`/study/${sessionId}/feynman`} className="px-6 py-3 bg-white text-[#403294] border border-[#403294] rounded font-medium hover:bg-[#F4F5F7] transition-colors text-sm min-w-[160px]">
-                            Learn with Feynman
-                        </Link>
+                                <Link href={`/study/${sessionId}/feynman`} className="px-4 py-2 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center whitespace-nowrap">
+                                    Learn with Feynman
+                                </Link>
                             </div>
                         )}
                     </div>

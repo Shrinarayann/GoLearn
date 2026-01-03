@@ -169,10 +169,9 @@ export default function VoiceChatPanel({
         }
 
         try {
-            // Get microphone access
+            // Get microphone access - let browser use native sample rate for better compatibility
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    sampleRate: 16000,
                     channelCount: 1,
                     echoCancellation: true,
                     noiseSuppression: true,
@@ -181,8 +180,8 @@ export default function VoiceChatPanel({
 
             mediaStreamRef.current = stream;
 
-            // Create audio context
-            const audioContext = new AudioContext({ sampleRate: 16000 });
+            // Create audio context with default sample rate (browser's native rate)
+            const audioContext = new AudioContext();
             audioContextRef.current = audioContext;
 
             // Create analyser for visualization
@@ -193,17 +192,35 @@ export default function VoiceChatPanel({
             const source = audioContext.createMediaStreamSource(stream);
             source.connect(analyser);
 
-            // Create ScriptProcessor for audio capture (AudioWorklet preferred but simpler for now)
+            // Create ScriptProcessor for audio capture
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            // Get the actual sample rate from the context
+            const contextSampleRate = audioContext.sampleRate;
+            const targetSampleRate = 16000;
 
             processor.onaudioprocess = (e) => {
                 if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
                 const inputData = e.inputBuffer.getChannelData(0);
+                
+                // Resample to 16kHz if needed
+                let resampledData: Float32Array;
+                if (contextSampleRate !== targetSampleRate) {
+                    const ratio = contextSampleRate / targetSampleRate;
+                    const newLength = Math.floor(inputData.length / ratio);
+                    resampledData = new Float32Array(newLength);
+                    for (let i = 0; i < newLength; i++) {
+                        resampledData[i] = inputData[Math.floor(i * ratio)];
+                    }
+                } else {
+                    resampledData = new Float32Array(inputData);
+                }
+                
                 // Convert to 16-bit PCM
-                const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                const pcmData = new Int16Array(resampledData.length);
+                for (let i = 0; i < resampledData.length; i++) {
+                    pcmData[i] = Math.max(-32768, Math.min(32767, resampledData[i] * 32768));
                 }
 
                 // Send to WebSocket as base64
