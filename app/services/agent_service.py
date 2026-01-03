@@ -526,7 +526,8 @@ async def run_engagement_phase(
 async def run_application_phase(
     exploration_result: dict,
     engagement_result: dict,
-    session_id: str
+    session_id: str,
+    content_parts: list = None  # Optional: for parallel mode
 ) -> dict:
     """Run application phase independently for streaming."""
     stream_session_id = f"stream_apply_{session_id}"
@@ -542,7 +543,14 @@ async def run_application_phase(
     
     logger.info(f"[Stream] Starting application for {session_id}")
     
-    context_text = f"""
+    # In parallel mode, use content_parts directly
+    # In sequential mode, use previous phase results as context
+    if content_parts and (not exploration_result or not engagement_result):
+        # Parallel mode: analyze content directly
+        message = types.Content(role="user", parts=content_parts)
+    else:
+        # Sequential mode: use context from previous phases
+        context_text = f"""
 === EXPLORATION ===
 {json.dumps(exploration_result, indent=2)}
 
@@ -551,7 +559,7 @@ async def run_application_phase(
 
 Provide application phase analysis based on the above.
 """
-    message = types.Content(role="user", parts=[types.Part(text=context_text)])
+        message = types.Content(role="user", parts=[types.Part(text=context_text)])
     
     async for event in _application_runner.run_async(
         user_id="golearn", session_id=stream_session_id, new_message=message

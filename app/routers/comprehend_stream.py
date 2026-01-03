@@ -37,6 +37,7 @@ async def comprehension_event_generator(
 ) -> AsyncGenerator[str, None]:
     """
     Generator that yields SSE events as each comprehension phase completes.
+    All 3 phases run in PARALLEL for faster results.
     """
     try:
         # Prepare content (extract text/images from PDF)
@@ -48,57 +49,91 @@ async def comprehension_event_generator(
         # Update session status to comprehending
         await db.update_session(session_id, {"status": "comprehending"})
         
-        # Phase 1: Exploration
-        yield f"data: {json.dumps({'phase': 'status', 'message': 'Starting exploration phase...'})}\n\n"
+        yield f"data: {json.dumps({'phase': 'status', 'message': 'Starting parallel analysis...'})}\n\n"
         
-        exploration_result = await run_exploration_phase(
-            content_parts=content_parts,
-            session_id=session_id
-        )
+        # Create a queue to receive results as they complete
+        result_queue: asyncio.Queue = asyncio.Queue()
         
-        # Save exploration result immediately
-        await db.update_session(session_id, {
-            "exploration_result": exploration_result
-        })
+        async def run_and_queue_exploration():
+            """Run exploration phase and put result in queue."""
+            try:
+                result = await run_exploration_phase(
+                    content_parts=content_parts,
+                    session_id=session_id
+                )
+                await result_queue.put(("exploration", result, None))
+            except Exception as e:
+                await result_queue.put(("exploration", None, str(e)))
         
-        yield f"data: {json.dumps({'phase': 'exploration', 'data': exploration_result})}\n\n"
+        async def run_and_queue_engagement():
+            """Run engagement phase and put result in queue."""
+            try:
+                # Run independently - no previous phase context
+                result = await run_engagement_phase(
+                    content_parts=content_parts,
+                    exploration_result={},  # No context in parallel mode
+                    extracted_images=extracted_images,
+                    session_id=session_id
+                )
+                await result_queue.put(("engagement", result, None))
+            except Exception as e:
+                await result_queue.put(("engagement", None, str(e)))
         
-        # Phase 2: Engagement
-        yield f"data: {json.dumps({'phase': 'status', 'message': 'Starting engagement phase...'})}\n\n"
+        async def run_and_queue_application():
+            """Run application phase and put result in queue."""
+            try:
+                # Run independently - no previous phase context
+                result = await run_application_phase(
+                    exploration_result={},  # No context in parallel mode
+                    engagement_result={},   # No context in parallel mode
+                    session_id=session_id,
+                    content_parts=content_parts  # Pass content directly
+                )
+                await result_queue.put(("application", result, None))
+            except Exception as e:
+                await result_queue.put(("application", None, str(e)))
         
-        engagement_result = await run_engagement_phase(
-            content_parts=content_parts,
-            exploration_result=exploration_result,
-            extracted_images=extracted_images,
-            session_id=session_id
-        )
+        # Start all 3 phases in parallel
+        tasks = [
+            asyncio.create_task(run_and_queue_exploration()),
+            asyncio.create_task(run_and_queue_engagement()),
+            asyncio.create_task(run_and_queue_application()),
+        ]
         
-        # Save engagement result immediately
-        await db.update_session(session_id, {
-            "engagement_result": engagement_result
-        })
+        # Yield results as they complete
+        completed = 0
+        errors = []
         
-        yield f"data: {json.dumps({'phase': 'engagement', 'data': engagement_result})}\n\n"
+        while completed < 3:
+            phase, result, error = await result_queue.get()
+            completed += 1
+            
+            if error:
+                errors.append(f"{phase}: {error}")
+                yield f"data: {json.dumps({'phase': 'status', 'message': f'{phase.capitalize()} phase failed: {error}'})}\n\n"
+                continue
+            
+            # Save result to database
+            if phase == "exploration":
+                await db.update_session(session_id, {"exploration_result": result})
+            elif phase == "engagement":
+                await db.update_session(session_id, {"engagement_result": result})
+            elif phase == "application":
+                await db.update_session(session_id, {"application_result": result})
+            
+            # Yield result to client
+            yield f"data: {json.dumps({'phase': phase, 'data': result})}\n\n"
         
-        # Phase 3: Application
-        yield f"data: {json.dumps({'phase': 'status', 'message': 'Starting application phase...'})}\n\n"
+        # Wait for all tasks to complete (cleanup)
+        await asyncio.gather(*tasks, return_exceptions=True)
         
-        application_result = await run_application_phase(
-            exploration_result=exploration_result,
-            engagement_result=engagement_result,
-            session_id=session_id
-        )
-        
-        # Save application result and update status to ready
-        await db.update_session(session_id, {
-            "application_result": application_result,
-            "status": "ready"
-        })
-        
-        yield f"data: {json.dumps({'phase': 'application', 'data': application_result})}\n\n"
-        
-        # Final completion event
-        yield f"data: {json.dumps({'phase': 'complete', 'status': 'ready'})}\n\n"
+        # Update status to ready if no fatal errors
+        if len(errors) < 3:  # At least one phase succeeded
+            await db.update_session(session_id, {"status": "ready"})
+            yield f"data: {json.dumps({'phase': 'complete', 'status': 'ready'})}\n\n"
+        else:
+            await db.update_session(session_id, {"status": "error"})
+            yield f"data: {json.dumps({'phase': 'error', 'message': 'All phases failed'})}\n\n"
         
     except Exception as e:
         # Send error event

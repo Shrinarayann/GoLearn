@@ -163,7 +163,6 @@ export default function StudySessionPage() {
                     },
                     onExploration: (data) => {
                         setExplorationLoading(false);
-                        setActiveTab("exploration");
                         setSession((prev) =>
                             prev
                                 ? { ...prev, exploration_result: data as ExplorationResult }
