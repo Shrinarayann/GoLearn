@@ -104,6 +104,22 @@ class FirestoreService:
             sessions.append(data)
         return sessions
     
+    async def get_user_sessions_summary(self, user_id: str) -> List[dict]:
+        """Get lightweight session summaries for dashboard (excludes heavy comprehension data)."""
+        docs = (
+            self.db.collection("study_sessions")
+            .where("user_id", "==", user_id)
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .select(["title", "status", "created_at", "enable_spaced_repetition"])
+            .stream()
+        )
+        sessions = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["session_id"] = doc.id
+            sessions.append(data)
+        return sessions
+    
     async def update_session(self, session_id: str, data: dict) -> None:
         """Update a study session."""
         self.db.collection("study_sessions").document(session_id).update(data)
@@ -162,8 +178,8 @@ class FirestoreService:
         Get all questions for a user across all their sessions.
         Returns questions with session metadata included.
         """
-        # First, get all user sessions to build a session_id -> title map
-        sessions = await self.get_user_sessions(user_id)
+        # First, get lightweight session summaries to build a session_id -> title map
+        sessions = await self.get_user_sessions_summary(user_id)
         session_map = {s["session_id"]: s.get("title", "Untitled") for s in sessions}
         session_ids = list(session_map.keys())
         

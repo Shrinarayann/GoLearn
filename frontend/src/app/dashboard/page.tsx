@@ -31,6 +31,7 @@ export default function DashboardPage() {
     const router = useRouter();
     const [sessions, setSessions] = useState<Session[]>([]);
     const [loadingSessions, setLoadingSessions] = useState(true);
+    const [loadingProgress, setLoadingProgress] = useState(true);
     const [newTitle, setNewTitle] = useState("");
     const [enableSpacedRepetition, setEnableSpacedRepetition] = useState(true);
     const [creating, setCreating] = useState(false);
@@ -44,15 +45,28 @@ export default function DashboardPage() {
         }
     }, [user, loading, router]);
 
-    const loadDashboardData = useCallback(async () => {
+    // Phase 1: Load sessions list immediately (fast)
+    const loadSessions = useCallback(async () => {
         if (!token) return;
         try {
-            // Single optimized API call for all dashboard data
+            const sessionsData = await api.getSessions(token);
+            setSessions(sessionsData);
+        } catch (error) {
+            console.error("Failed to load sessions:", error);
+        } finally {
+            setLoadingSessions(false);
+        }
+    }, [token]);
+
+    // Phase 2: Load progress data in background (slower)
+    const loadProgressData = useCallback(async () => {
+        if (!token) return;
+        try {
             const data = await api.getDashboardData(token);
-
-            // Set sessions
+            
+            // Update sessions with fresh data
             setSessions(data.sessions);
-
+            
             // Set global progress
             setGlobalProgress(data.global_progress);
 
@@ -67,17 +81,19 @@ export default function DashboardPage() {
             });
             setProgressData(progressMap);
         } catch (error) {
-            console.error("Failed to load dashboard data:", error);
+            console.error("Failed to load progress data:", error);
         } finally {
-            setLoadingSessions(false);
+            setLoadingProgress(false);
         }
     }, [token]);
 
     useEffect(() => {
         if (token) {
-            loadDashboardData();
+            // Load sessions first (fast), then progress (slower) in parallel
+            loadSessions();
+            loadProgressData();
         }
-    }, [token, loadDashboardData]);
+    }, [token, loadSessions, loadProgressData]);
 
     const createSession = async () => {
         if (!token || !newTitle.trim()) return;

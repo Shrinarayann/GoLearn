@@ -517,8 +517,8 @@ async def get_global_due_questions(
     """
     user_id = current_user["user_id"]
     
-    # Get all user sessions to filter by spaced repetition status
-    all_sessions = await db.get_user_sessions(user_id)
+    # Get lightweight session summaries to filter by spaced repetition status
+    all_sessions = await db.get_user_sessions_summary(user_id)
     sr_enabled_session_ids = {
         s["session_id"] for s in all_sessions 
         if s.get("enable_spaced_repetition", True)
@@ -588,8 +588,8 @@ async def get_global_progress(
     """
     user_id = current_user["user_id"]
     
-    # Get all user sessions
-    sessions = await db.get_user_sessions(user_id)
+    # Get lightweight session summaries (includes title, status, enable_spaced_repetition)
+    sessions = await db.get_user_sessions_summary(user_id)
     
     if not sessions:
         return GlobalProgressResponse(
