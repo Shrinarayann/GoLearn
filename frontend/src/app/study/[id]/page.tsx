@@ -81,6 +81,12 @@ export default function StudySessionPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [showExamModal, setShowExamModal] = useState(false);
 
+    // Per-phase loading states for streaming
+    const [explorationLoading, setExplorationLoading] = useState(false);
+    const [engagementLoading, setEngagementLoading] = useState(false);
+    const [applicationLoading, setApplicationLoading] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string>("");
+
     // Exam generation context
     const { getExamStatus, refreshExamStatus } = useExam();
     const examStatus = getExamStatus(sessionId);
@@ -139,31 +145,68 @@ export default function StudySessionPage() {
 
         setComprehending(true);
         setError("");
+        setStatusMessage("");
+
+        // Reset per-phase loading states
+        setExplorationLoading(true);
+        setEngagementLoading(true);
+        setApplicationLoading(true);
 
         try {
-            // Send PDF file directly with comprehension request
-            const result = await api.runComprehension(
+            // Use SSE streaming for progressive results
+            await api.runComprehensionStream(
                 token,
                 sessionId,
+                {
+                    onStatus: (message) => {
+                        setStatusMessage(message);
+                    },
+                    onExploration: (data) => {
+                        setExplorationLoading(false);
+                        setSession((prev) =>
+                            prev
+                                ? { ...prev, exploration_result: data as ExplorationResult }
+                                : null
+                        );
+                    },
+                    onEngagement: (data) => {
+                        setEngagementLoading(false);
+                        setSession((prev) =>
+                            prev
+                                ? { ...prev, engagement_result: data as EngagementResult }
+                                : null
+                        );
+                    },
+                    onApplication: (data) => {
+                        setApplicationLoading(false);
+                        setSession((prev) =>
+                            prev
+                                ? { ...prev, application_result: data as ApplicationResult, status: "ready" }
+                                : null
+                        );
+                    },
+                    onComplete: () => {
+                        setComprehending(false);
+                        setStatusMessage("");
+                    },
+                    onError: (error) => {
+                        setError(error.message || "Comprehension failed. Please try again.");
+                        setComprehending(false);
+                        setExplorationLoading(false);
+                        setEngagementLoading(false);
+                        setApplicationLoading(false);
+                    },
+                },
                 content || undefined,
                 pdfFile || undefined
-            );
-            setSession((prev) =>
-                prev
-                    ? {
-                        ...prev,
-                        status: result.status,
-                        exploration_result: result.exploration as ExplorationResult,
-                        engagement_result: result.engagement as EngagementResult,
-                        application_result: result.application as ApplicationResult,
-                    }
-                    : null
             );
         } catch (error) {
             console.error("Comprehension failed:", error);
             setError("Comprehension failed. Please try again.");
-        } finally {
             setComprehending(false);
+            setExplorationLoading(false);
+            setEngagementLoading(false);
+            setApplicationLoading(false);
         }
     };
 
@@ -175,7 +218,10 @@ export default function StudySessionPage() {
         );
     }
 
-    const hasResults = session?.status === "ready" || session?.status === "quizzing";
+    // Show results section if session is ready, quizzing, or streaming is in progress
+    const hasResults = session?.status === "ready" || session?.status === "quizzing" ||
+        session?.status === "comprehending" || session?.exploration_result ||
+        explorationLoading || engagementLoading || applicationLoading;
 
     const tabs = [
         { id: "exploration" as TabType, label: "Exploration", num: 1 },
@@ -366,33 +412,79 @@ export default function StudySessionPage() {
                         <div className="bg-white rounded-lg border border-[#DFE1E6]">
                             <div className="border-b border-[#DFE1E6] overflow-x-auto">
                                 <nav className="flex min-w-max">
-                                    {tabs.map((tab) => (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => setActiveTab(tab.id)}
-                                            className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id
-                                                ? "border-[#0052CC] text-[#0052CC]"
-                                                : "border-transparent text-[#6B778C] hover:text-[#172B4D] hover:border-[#DFE1E6]"
-                                                }`}
-                                        >
-                                            <span className="w-5 h-5 rounded-full bg-current/10 text-xs flex items-center justify-center font-bold">{tab.num}</span>
-                                            <span className="hidden sm:inline">{tab.label}</span>
-                                            <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
-                                        </button>
-                                    ))}
+                                    {tabs.map((tab) => {
+                                        const isLoading =
+                                            (tab.id === "exploration" && explorationLoading) ||
+                                            (tab.id === "engagement" && engagementLoading) ||
+                                            (tab.id === "application" && applicationLoading);
+                                        const hasData =
+                                            (tab.id === "exploration" && session?.exploration_result) ||
+                                            (tab.id === "engagement" && session?.engagement_result) ||
+                                            (tab.id === "application" && session?.application_result);
+
+                                        return (
+                                            <button
+                                                key={tab.id}
+                                                onClick={() => setActiveTab(tab.id)}
+                                                className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id
+                                                    ? "border-[#0052CC] text-[#0052CC]"
+                                                    : "border-transparent text-[#6B778C] hover:text-[#172B4D] hover:border-[#DFE1E6]"
+                                                    }`}
+                                            >
+                                                {isLoading ? (
+                                                    <span className="w-5 h-5 flex items-center justify-center">
+                                                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
+                                                    </span>
+                                                ) : hasData ? (
+                                                    <span className="w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs flex items-center justify-center">✓</span>
+                                                ) : (
+                                                    <span className="w-5 h-5 rounded-full bg-current/10 text-xs flex items-center justify-center font-bold">{tab.num}</span>
+                                                )}
+                                                <span className="hidden sm:inline">{tab.label}</span>
+                                                <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+                                            </button>
+                                        );
+                                    })}
                                 </nav>
                             </div>
 
                             {/* Tab Content */}
                             <div className="p-4 sm:p-6">
-                                {activeTab === "exploration" && session.exploration_result && (
-                                    <ExplorationTab data={session.exploration_result} />
+                                {statusMessage && comprehending && (
+                                    <div className="mb-4 text-sm text-[#6B778C] flex items-center gap-2">
+                                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-[#0052CC] border-t-transparent" />
+                                        {statusMessage}
+                                    </div>
                                 )}
-                                {activeTab === "engagement" && session.engagement_result && (
-                                    <EngagementTab data={session.engagement_result} />
+                                {activeTab === "exploration" && (
+                                    explorationLoading ? (
+                                        <div className="flex flex-col items-center justify-center py-12 text-[#6B778C]">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052CC] border-t-transparent mb-3" />
+                                            <span>Analyzing content structure...</span>
+                                        </div>
+                                    ) : session?.exploration_result ? (
+                                        <ExplorationTab data={session.exploration_result} />
+                                    ) : null
                                 )}
-                                {activeTab === "application" && session.application_result && (
-                                    <ApplicationTab data={session.application_result} sessionId={sessionId} />
+                                {activeTab === "engagement" && (
+                                    engagementLoading ? (
+                                        <div className="flex flex-col items-center justify-center py-12 text-[#6B778C]">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052CC] border-t-transparent mb-3" />
+                                            <span>Deep diving into concepts...</span>
+                                        </div>
+                                    ) : session?.engagement_result ? (
+                                        <EngagementTab data={session.engagement_result} />
+                                    ) : null
+                                )}
+                                {activeTab === "application" && (
+                                    applicationLoading ? (
+                                        <div className="flex flex-col items-center justify-center py-12 text-[#6B778C]">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#0052CC] border-t-transparent mb-3" />
+                                            <span>Synthesizing applications...</span>
+                                        </div>
+                                    ) : session?.application_result ? (
+                                        <ApplicationTab data={session.application_result} sessionId={sessionId} />
+                                    ) : null
                                 )}
                             </div>
                         </div>
