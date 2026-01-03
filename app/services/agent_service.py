@@ -346,6 +346,230 @@ async def run_comprehension(
     return result
 
 
+# === STREAMING PHASE FUNCTIONS ===
+# These functions run each phase separately to enable SSE streaming
+
+# Import individual agents for streaming
+from study_agent.comprehension.exploration_agent import exploration_agent
+from study_agent.comprehension.engagement_agent import engagement_agent
+from study_agent.comprehension.application_agent import application_agent
+
+# Create separate runners for each agent (for streaming)
+_exploration_runner = Runner(
+    agent=exploration_agent,
+    app_name="golearn_stream",
+    session_service=_session_service
+)
+
+_engagement_runner = Runner(
+    agent=engagement_agent,
+    app_name="golearn_stream",
+    session_service=_session_service
+)
+
+_application_runner = Runner(
+    agent=application_agent,
+    app_name="golearn_stream",
+    session_service=_session_service
+)
+
+
+async def prepare_content_for_analysis(
+    content: str,
+    pdf_bytes: Optional[bytes],
+    session_id: str
+) -> dict:
+    """
+    Prepare content for analysis - extract text and images from PDF.
+    Returns dict with extracted_text, extracted_images, and content_parts for LLM.
+    """
+    content_parts = []
+    extracted_text = content or ""
+    extracted_images_data = []
+    
+    if pdf_bytes:
+        try:
+            pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
+            if pdf_text.strip():
+                extracted_text = pdf_text if not content else f"{content}\n\n{pdf_text}"
+            logger.info(f"[Stream] Extracted {len(pdf_text)} chars from PDF")
+            
+            image_extraction_result = extract_images_from_pdf_bytes_as_base64(pdf_bytes)
+            extracted_images_data = image_extraction_result.get("images", [])
+            logger.info(f"[Stream] Extracted {len(extracted_images_data)} images from PDF")
+        except Exception as e:
+            logger.error(f"[Stream] PDF extraction failed: {e}")
+    
+    if extracted_text:
+        content_parts.append(types.Part(text=extracted_text))
+    
+    if extracted_images_data:
+        content_parts.append(types.Part(text=f"\n\n=== IMAGES ({len(extracted_images_data)} total) ===\n"))
+        for idx, img_data in enumerate(extracted_images_data):
+            try:
+                data_url = img_data.get("data_url", "")
+                if data_url and "base64," in data_url:
+                    content_parts.append(types.Part(text=f"\n--- IMAGE {idx + 1} ---"))
+                    base64_data = data_url.split("base64,")[1]
+                    mime_type = img_data.get("mime_type", "image/jpeg")
+                    content_parts.append(types.Part(
+                        inline_data=types.Blob(mime_type=mime_type, data=base64_data)
+                    ))
+            except Exception as e:
+                logger.error(f"[Stream] Image {idx} failed: {e}")
+        content_parts.append(types.Part(text="\n=== END IMAGES ===\n"))
+    
+    if not content_parts:
+        raise ValueError("No content provided for analysis")
+    
+    return {
+        "extracted_text": extracted_text,
+        "extracted_images": extracted_images_data,
+        "content_parts": content_parts
+    }
+
+
+async def run_exploration_phase(content_parts: list, session_id: str) -> dict:
+    """Run exploration phase independently for streaming."""
+    stream_session_id = f"stream_explore_{session_id}"
+    
+    try:
+        await _session_service.create_session(
+            app_name="golearn_stream", user_id="golearn",
+            session_id=stream_session_id, state={},
+        )
+    except:
+        pass
+    
+    logger.info(f"[Stream] Starting exploration for {session_id}")
+    message = types.Content(role="user", parts=content_parts)
+    
+    async for event in _exploration_runner.run_async(
+        user_id="golearn", session_id=stream_session_id, new_message=message
+    ):
+        pass
+    
+    session = await _session_service.get_session(
+        app_name="golearn_stream", user_id="golearn", session_id=stream_session_id
+    )
+    
+    result = session.state.get("exploration_result", {}) if session else {}
+    if isinstance(result, str):
+        result = _parse_json_response(result, "Exploration")
+    
+    logger.info(f"[Stream] Exploration complete")
+    return result
+
+
+async def run_engagement_phase(
+    content_parts: list,
+    exploration_result: dict,
+    extracted_images: list,
+    session_id: str
+) -> dict:
+    """Run engagement phase independently for streaming."""
+    stream_session_id = f"stream_engage_{session_id}"
+    
+    try:
+        await _session_service.create_session(
+            app_name="golearn_stream", user_id="golearn",
+            session_id=stream_session_id, state={"exploration_result": exploration_result},
+        )
+    except:
+        pass
+    
+    logger.info(f"[Stream] Starting engagement for {session_id}")
+    
+    context_text = f"\n\n=== EXPLORATION RESULT ===\n{json.dumps(exploration_result, indent=2)}\n=== END ===\n"
+    enhanced_parts = content_parts + [types.Part(text=context_text)]
+    message = types.Content(role="user", parts=enhanced_parts)
+    
+    async for event in _engagement_runner.run_async(
+        user_id="golearn", session_id=stream_session_id, new_message=message
+    ):
+        pass
+    
+    session = await _session_service.get_session(
+        app_name="golearn_stream", user_id="golearn", session_id=stream_session_id
+    )
+    
+    result = session.state.get("engagement_result", {}) if session else {}
+    if isinstance(result, str):
+        result = _parse_json_response(result, "Engagement")
+    
+    # Annotate with image URLs
+    if extracted_images and isinstance(result, dict):
+        try:
+            firebase_images = await upload_extracted_images_to_storage(
+                session_id=session_id, images=extracted_images
+            )
+            if "image_captions" in result and isinstance(result["image_captions"], list):
+                for idx, caption in enumerate(result["image_captions"]):
+                    if idx < len(firebase_images) and isinstance(caption, dict):
+                        caption["has_image"] = True
+                        caption["image_url"] = firebase_images[idx].get("firebase_url")
+                        caption["image_index"] = idx
+            elif firebase_images:
+                result["image_captions"] = [
+                    {"image_index": idx, "caption": f"Figure {idx+1}", "type": "unknown",
+                     "relevance": "medium", "key_points": [], "has_image": True,
+                     "image_url": img.get("firebase_url")}
+                    for idx, img in enumerate(firebase_images)
+                ]
+        except Exception as e:
+            logger.error(f"[Stream] Image annotation failed: {e}")
+    
+    logger.info(f"[Stream] Engagement complete")
+    return result
+
+
+async def run_application_phase(
+    exploration_result: dict,
+    engagement_result: dict,
+    session_id: str
+) -> dict:
+    """Run application phase independently for streaming."""
+    stream_session_id = f"stream_apply_{session_id}"
+    
+    try:
+        await _session_service.create_session(
+            app_name="golearn_stream", user_id="golearn",
+            session_id=stream_session_id,
+            state={"exploration_result": exploration_result, "engagement_result": engagement_result},
+        )
+    except:
+        pass
+    
+    logger.info(f"[Stream] Starting application for {session_id}")
+    
+    context_text = f"""
+=== EXPLORATION ===
+{json.dumps(exploration_result, indent=2)}
+
+=== ENGAGEMENT ===
+{json.dumps(engagement_result, indent=2)}
+
+Provide application phase analysis based on the above.
+"""
+    message = types.Content(role="user", parts=[types.Part(text=context_text)])
+    
+    async for event in _application_runner.run_async(
+        user_id="golearn", session_id=stream_session_id, new_message=message
+    ):
+        pass
+    
+    session = await _session_service.get_session(
+        app_name="golearn_stream", user_id="golearn", session_id=stream_session_id
+    )
+    
+    result = session.state.get("application_result", {}) if session else {}
+    if isinstance(result, str):
+        result = _parse_json_response(result, "Application")
+    
+    logger.info(f"[Stream] Application complete")
+    return result
+
+
 async def generate_questions(
     exploration: dict,
     engagement: dict,

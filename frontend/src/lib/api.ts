@@ -194,6 +194,103 @@ class ApiClient {
         });
     }
 
+    /**
+     * Run comprehension with SSE streaming.
+     * Results are progressively returned via callbacks as each phase completes.
+     */
+    async runComprehensionStream(
+        token: string,
+        sessionId: string,
+        callbacks: {
+            onExploration?: (data: Record<string, unknown>) => void;
+            onEngagement?: (data: Record<string, unknown>) => void;
+            onApplication?: (data: Record<string, unknown>) => void;
+            onStatus?: (message: string) => void;
+            onError?: (error: Error) => void;
+            onComplete?: () => void;
+        },
+        content?: string,
+        pdfFile?: File
+    ): Promise<void> {
+        const formData = new FormData();
+        
+        if (pdfFile) {
+            formData.append("file", pdfFile);
+        }
+        if (content) {
+            const blob = new Blob([JSON.stringify({ content })], { type: "application/json" });
+            formData.append("request", blob);
+        }
+
+        const response = await fetch(
+            `${this.baseUrl}/study/sessions/${sessionId}/comprehend-stream`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `API Error: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+            throw new Error("No response body");
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            switch (data.phase) {
+                                case "exploration":
+                                    callbacks.onExploration?.(data.data);
+                                    break;
+                                case "engagement":
+                                    callbacks.onEngagement?.(data.data);
+                                    break;
+                                case "application":
+                                    callbacks.onApplication?.(data.data);
+                                    break;
+                                case "status":
+                                    callbacks.onStatus?.(data.message);
+                                    break;
+                                case "complete":
+                                    callbacks.onComplete?.();
+                                    break;
+                                case "error":
+                                    callbacks.onError?.(new Error(data.message));
+                                    break;
+                            }
+                        } catch (e) {
+                            console.error("Failed to parse SSE data:", e);
+                        }
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
     // Quiz
     async generateQuiz(token: string, sessionId: string) {
         return this.request<Array<{
