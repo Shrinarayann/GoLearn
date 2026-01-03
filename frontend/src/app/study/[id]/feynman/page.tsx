@@ -37,6 +37,7 @@ export default function FeynmanPage() {
     const [topics, setTopics] = useState<FeynmanTopic[]>([]);
     const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
     const [showTopicModal, setShowTopicModal] = useState(false);
+    const [loadingTopics, setLoadingTopics] = useState(true);
     const [isEvaluating, setIsEvaluating] = useState(false);
     const [evaluationResult, setEvaluationResult] = useState<{ score: number; feedback: string } | null>(null);
     const [isVoiceMode, setIsVoiceMode] = useState(false);
@@ -60,6 +61,7 @@ export default function FeynmanPage() {
 
     const loadInitialData = async () => {
         if (!token) return;
+        setLoadingTopics(true);
         try {
             const sessionData = await api.getSession(token, sessionId);
             setSessionTitle(sessionData.title);
@@ -80,6 +82,8 @@ export default function FeynmanPage() {
         } catch (error) {
             console.error("Failed to load initial data:", error);
             setError("Failed to load session context");
+        } finally {
+            setLoadingTopics(false);
         }
     };
 
@@ -402,6 +406,18 @@ export default function FeynmanPage() {
                             Shift + Enter for new line. Keep it simple and use analogies!
                         </p>
                     </div>
+
+                    {/* Loading Topics Spinner */}
+                    {loadingTopics && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#FAFBFC]/80 backdrop-blur-sm">
+                            <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 text-center shadow-xl">
+                                <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#0052CC] border-t-transparent mx-auto mb-4"></div>
+                                <h2 className="text-lg font-semibold text-[#172B4D]">Loading Topics...</h2>
+                                <p className="text-[#6B778C] mt-2 text-sm">Preparing your learning session</p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Topic Selection Modal */}
                     {showTopicModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
