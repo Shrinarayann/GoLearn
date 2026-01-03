@@ -436,7 +436,7 @@ async def submit_answer(
             new_box = 1
             new_s = 1.0  # Reset stability
             new_d = question.get("fsrs_difficulty") or 5.0  # Keep difficulty
-            next_review = datetime.utcnow()  # Immediately due!
+            next_review = datetime.utcnow() + timedelta(minutes=10)  # 10-min delay before retry
             
             if concept_data:
                 # Update concept with reset stability
