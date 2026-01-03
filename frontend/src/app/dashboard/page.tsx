@@ -63,10 +63,10 @@ export default function DashboardPage() {
         if (!token) return;
         try {
             const data = await api.getDashboardData(token);
-            
+
             // Update sessions with fresh data
             setSessions(data.sessions);
-            
+
             // Set global progress
             setGlobalProgress(data.global_progress);
 
@@ -105,7 +105,7 @@ export default function DashboardPage() {
         try {
             await api.deleteSession(token, sessionId);
             // Refresh all data to ensure global stats and sessions are synchronized
-            await loadDashboardData();
+            await loadProgressData();
         } catch (error) {
             console.error("Failed to delete session:", error);
             alert("Failed to delete session. Please try again.");
