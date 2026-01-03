@@ -154,8 +154,6 @@ async def comprehension_event_generator(
         # Update session status to comprehending
         await db.update_session(session_id, {"status": "comprehending"})
         
-        yield f"data: {json.dumps({'phase': 'status', 'message': 'Starting parallel analysis...'})}\n\n"
-        
         # Create a queue to receive results as they complete
         result_queue: asyncio.Queue = asyncio.Queue()
         
