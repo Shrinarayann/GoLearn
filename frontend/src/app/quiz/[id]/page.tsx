@@ -19,14 +19,34 @@ interface Question {
     session_title?: string;
 }
 
-interface AnswerResult {
-    correct: boolean;
+interface QuizResult {
+    question_id: string;
+    question: string;
+    question_type: string;
+    difficulty: string;
+    concept: string;
+    user_answer: string;
+    correct: boolean | null;
     correct_answer: string;
     explanation: string;
-    new_stability: number;
-    new_difficulty: number;
-    next_review_at: string;
-    feedback?: string;
+    feedback: string | null;
+    new_leitner_box: number | null;
+    evaluation_status: string;
+}
+
+interface QuizResultsData {
+    session_id: string;
+    total_questions: number;
+    evaluated_count: number;
+    correct_count: number;
+    results: QuizResult[];
+}
+
+// Track submitted answers locally for global mode
+interface SubmittedAnswer {
+    questionId: string;
+    answer: string;
+    sessionId: string;
 }
 
 export default function QuizPage() {
@@ -41,11 +61,14 @@ export default function QuizPage() {
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [answer, setAnswer] = useState("");
-    const [result, setResult] = useState<AnswerResult | null>(null);
     const [generating, setGenerating] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [completed, setCompleted] = useState(false);
-    const [score, setScore] = useState({ correct: 0, total: 0 });
+
+    // New states for batch evaluation
+    const [allAnswered, setAllAnswered] = useState(false);
+    const [loadingResults, setLoadingResults] = useState(false);
+    const [quizResults, setQuizResults] = useState<QuizResultsData | null>(null);
+    const [submittedAnswers, setSubmittedAnswers] = useState<SubmittedAnswer[]>([]);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -65,17 +88,13 @@ export default function QuizPage() {
 
         try {
             if (isGlobalMode) {
-                // Global review mode - fetch all due questions across sessions
                 const data = await api.getGlobalDueQuestions(token);
                 setQuestions(data);
             } else {
-                // Session-specific mode
-                // In review mode, fetch only due questions
                 const data = await api.getQuestions(token, sessionId, isReviewMode);
                 if (data.length > 0) {
                     setQuestions(data);
                 } else if (!isReviewMode) {
-                    // Only generate new quiz if not in review mode
                     generateQuiz();
                 }
             }
@@ -106,12 +125,24 @@ export default function QuizPage() {
         setSubmitting(true);
 
         try {
-            const res = await api.submitAnswer(token, currentQuestion.question_id, answer);
-            setResult(res);
-            setScore((prev) => ({
-                correct: prev.correct + (res.correct ? 1 : 0),
-                total: prev.total + 1,
-            }));
+            // Fire-and-forget submission
+            await api.submitAnswerAsync(token, currentQuestion.question_id, answer);
+
+            // Track submitted answer locally (for global mode results)
+            setSubmittedAnswers(prev => [...prev, {
+                questionId: currentQuestion.question_id,
+                answer: answer,
+                sessionId: currentQuestion.session_id || sessionId
+            }]);
+
+            // Move to next question immediately
+            if (currentIndex < questions.length - 1) {
+                setCurrentIndex(prev => prev + 1);
+                setAnswer("");
+            } else {
+                // All questions answered
+                setAllAnswered(true);
+            }
         } catch (error) {
             console.error("Failed to submit answer:", error);
         } finally {
@@ -119,13 +150,47 @@ export default function QuizPage() {
         }
     };
 
-    const nextQuestion = () => {
-        if (currentIndex < questions.length - 1) {
-            setCurrentIndex((prev) => prev + 1);
-            setAnswer("");
-            setResult(null);
-        } else {
-            setCompleted(true);
+    const fetchResults = async () => {
+        if (!token) return;
+        setLoadingResults(true);
+
+        try {
+            if (isGlobalMode) {
+                // For global mode, we need to fetch results from multiple sessions
+                const sessionIds = [...new Set(submittedAnswers.map(a => a.sessionId))];
+                const allResults: QuizResult[] = [];
+                let totalCorrect = 0;
+                let totalEvaluated = 0;
+
+                for (const sid of sessionIds) {
+                    try {
+                        const results = await api.getQuizResults(token, sid);
+                        // Filter to only include questions we answered in this quiz session
+                        const answeredIds = new Set(submittedAnswers.filter(a => a.sessionId === sid).map(a => a.questionId));
+                        const filteredResults = results.results.filter(r => answeredIds.has(r.question_id));
+                        allResults.push(...filteredResults);
+                        totalCorrect += filteredResults.filter(r => r.correct).length;
+                        totalEvaluated += filteredResults.filter(r => r.evaluation_status === "completed").length;
+                    } catch (e) {
+                        console.error(`Failed to get results for session ${sid}:`, e);
+                    }
+                }
+
+                setQuizResults({
+                    session_id: "global",
+                    total_questions: allResults.length,
+                    evaluated_count: totalEvaluated,
+                    correct_count: totalCorrect,
+                    results: allResults
+                });
+            } else {
+                const results = await api.getQuizResults(token, sessionId);
+                setQuizResults(results);
+            }
+        } catch (error) {
+            console.error("Failed to fetch results:", error);
+        } finally {
+            setLoadingResults(false);
         }
     };
 
@@ -139,6 +204,7 @@ export default function QuizPage() {
 
     const currentQuestion = questions[currentIndex];
     const progress = questions.length > 0 ? ((currentIndex + 1) / questions.length) * 100 : 0;
+    const answeredProgress = questions.length > 0 ? (submittedAnswers.length / questions.length) * 100 : 0;
 
     const getDifficultyColor = (diff: string) => {
         switch (diff) {
@@ -158,13 +224,140 @@ export default function QuizPage() {
         }
     };
 
-    const getStabilityBox = (s: number) => {
-        if (s < 1) return 1;
-        if (s < 3) return 2;
-        if (s < 7) return 3;
-        if (s < 14) return 4;
-        return 5;
-    };
+    // Show results view
+    if (quizResults) {
+        const percentage = quizResults.total_questions > 0
+            ? Math.round((quizResults.correct_count / quizResults.total_questions) * 100)
+            : 0;
+
+        return (
+            <div className="min-h-screen bg-[#FAFBFC]">
+                <header className="bg-white border-b border-[#DFE1E6] sticky top-0 z-10">
+                    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4">
+                        <div className="flex items-center justify-between">
+                            <h1 className="text-xl font-bold text-[#172B4D]">Quiz Results</h1>
+                            <div className="flex items-center gap-3">
+                                <span className={`px-4 py-2 rounded-lg text-lg font-bold ${percentage >= 70 ? "bg-[#E3FCEF] text-[#006644]" :
+                                        percentage >= 50 ? "bg-[#FFFAE6] text-[#FF8B00]" :
+                                            "bg-[#FFEBE6] text-[#DE350B]"
+                                    }`}>
+                                    {quizResults.correct_count}/{quizResults.total_questions} ({percentage}%)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
+                    {/* Summary Card */}
+                    <div className="bg-white rounded-lg border border-[#DFE1E6] p-6 mb-6">
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <div className="text-center sm:text-left">
+                                <h2 className="text-2xl font-bold text-[#172B4D] mb-1">
+                                    {percentage >= 70 ? "🎉 Great job!" : percentage >= 50 ? "👍 Good effort!" : "📚 Keep practicing!"}
+                                </h2>
+                                <p className="text-[#6B778C]">
+                                    You got {quizResults.correct_count} out of {quizResults.total_questions} questions correct
+                                </p>
+                            </div>
+                            <div className="flex gap-3">
+                                <Link
+                                    href={isGlobalMode ? "/dashboard" : `/study/${sessionId}`}
+                                    className="px-5 py-2.5 border border-[#DFE1E6] text-[#172B4D] rounded font-medium hover:bg-[#F4F5F7] transition-colors"
+                                >
+                                    {isGlobalMode ? "Dashboard" : "Back to Study"}
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Results List */}
+                    <div className="space-y-4">
+                        {quizResults.results.map((result, index) => (
+                            <div
+                                key={result.question_id}
+                                className={`bg-white rounded-lg border ${result.evaluation_status === "pending" ? "border-[#DFE1E6]" :
+                                        result.correct ? "border-[#36B37E]" : "border-[#DE350B]"
+                                    } overflow-hidden`}
+                            >
+                                {/* Question Header */}
+                                <div className={`px-4 py-3 ${result.evaluation_status === "pending" ? "bg-[#F4F5F7]" :
+                                        result.correct ? "bg-[#E3FCEF]" : "bg-[#FFEBE6]"
+                                    }`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium text-[#172B4D]">Q{index + 1}</span>
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(result.question_type)}`}>
+                                                {result.question_type}
+                                            </span>
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getDifficultyColor(result.difficulty)}`}>
+                                                {result.difficulty}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {result.evaluation_status === "pending" ? (
+                                                <span className="flex items-center gap-1 text-[#6B778C] text-sm">
+                                                    <div className="animate-spin rounded-full h-3 w-3 border border-[#6B778C] border-t-transparent"></div>
+                                                    Evaluating...
+                                                </span>
+                                            ) : result.correct ? (
+                                                <span className="flex items-center gap-1 text-[#006644] font-medium">
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                    Correct
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-[#DE350B] font-medium">
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                    </svg>
+                                                    Incorrect
+                                                </span>
+                                            )}
+                                            {result.new_leitner_box && (
+                                                <span className="text-xs text-[#6B778C]">→ Box {result.new_leitner_box}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Question Content */}
+                                <div className="p-4 space-y-3">
+                                    <p className="text-[#172B4D] font-medium">{result.question}</p>
+
+                                    <div className="grid gap-2 text-sm">
+                                        <div className="flex gap-2">
+                                            <span className="text-[#6B778C] w-24 flex-shrink-0">Your answer:</span>
+                                            <span className="text-[#172B4D]">{result.user_answer}</span>
+                                        </div>
+                                        {!result.correct && result.evaluation_status === "completed" && (
+                                            <div className="flex gap-2">
+                                                <span className="text-[#6B778C] w-24 flex-shrink-0">Correct:</span>
+                                                <span className="text-[#006644] font-medium">{result.correct_answer}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {result.explanation && (
+                                        <div className="bg-[#F4F5F7] rounded p-3 text-sm text-[#42526E]">
+                                            {result.explanation}
+                                        </div>
+                                    )}
+
+                                    {result.feedback && (
+                                        <div className="bg-[#FFFAE6] border border-[#FFE380] rounded p-3 text-sm text-[#172B4D]">
+                                            💡 {result.feedback}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </main>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#FAFBFC]">
@@ -191,10 +384,7 @@ export default function QuizPage() {
                                 </span>
                             )}
                             <span className="text-xs sm:text-sm text-[#6B778C]">
-                                {currentIndex + 1}/{questions.length}
-                            </span>
-                            <span className="px-2 sm:px-3 py-1 bg-[#DEEBFF] text-[#0747A6] rounded text-xs sm:text-sm font-medium">
-                                {score.correct}/{score.total}
+                                Question {allAnswered ? questions.length : currentIndex + 1} of {questions.length}
                             </span>
                         </div>
                     </div>
@@ -202,7 +392,7 @@ export default function QuizPage() {
                     <div className="mt-3 sm:mt-4 h-1 bg-[#DFE1E6] rounded-full overflow-hidden">
                         <div
                             className="h-full bg-[#0052CC] transition-all duration-300"
-                            style={{ width: `${progress}%` }}
+                            style={{ width: `${allAnswered ? 100 : progress}%` }}
                         />
                     </div>
                 </div>
@@ -215,31 +405,33 @@ export default function QuizPage() {
                         <h2 className="text-base sm:text-lg font-semibold text-[#172B4D]">Generating Quiz Questions...</h2>
                         <p className="text-[#6B778C] mt-2 text-xs sm:text-sm">Creating personalized questions based on your study material</p>
                     </div>
-                ) : completed ? (
+                ) : allAnswered ? (
                     <div className="bg-white rounded-lg border border-[#DFE1E6] p-8 sm:p-12 text-center">
-                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[#E3FCEF] rounded-full flex items-center justify-center mx-auto mb-4">
-                            <svg className="w-6 h-6 sm:w-8 sm:h-8 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        <h2 className="text-xl sm:text-2xl font-bold text-[#172B4D] mb-2">Quiz Complete!</h2>
-                        <p className="text-lg sm:text-xl text-[#6B778C] mb-6">
-                            You scored {score.correct} out of {score.total} ({Math.round((score.correct / score.total) * 100)}%)
-                        </p>
-                        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
-                            <Link
-                                href={`/study/${sessionId}`}
-                                className="px-5 py-2.5 border border-[#DFE1E6] text-[#172B4D] rounded font-medium hover:bg-[#F4F5F7] transition-colors text-center"
-                            >
-                                Back to Study
-                            </Link>
-                            <Link
-                                href="/dashboard"
-                                className="px-5 py-2.5 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-center"
-                            >
-                                Dashboard
-                            </Link>
-                        </div>
+                        {loadingResults ? (
+                            <>
+                                <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-2 border-[#0052CC] border-t-transparent mx-auto mb-4"></div>
+                                <h2 className="text-base sm:text-lg font-semibold text-[#172B4D]">Evaluating Your Answers...</h2>
+                                <p className="text-[#6B778C] mt-2 text-xs sm:text-sm">Please wait while we check your responses</p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[#DEEBFF] rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <svg className="w-6 h-6 sm:w-8 sm:h-8 text-[#0052CC]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl sm:text-2xl font-bold text-[#172B4D] mb-2">All Questions Answered!</h2>
+                                <p className="text-[#6B778C] mb-6">
+                                    You've answered all {questions.length} questions. Click below to see your results.
+                                </p>
+                                <button
+                                    onClick={fetchResults}
+                                    className="px-8 py-3 bg-[#0052CC] text-white rounded-lg font-medium hover:bg-[#0747A6] transition-colors text-lg"
+                                >
+                                    View Results
+                                </button>
+                            </>
+                        )}
                     </div>
                 ) : currentQuestion ? (
                     <div className="bg-white rounded-lg border border-[#DFE1E6]">
@@ -272,83 +464,35 @@ export default function QuizPage() {
                             </h2>
                         </div>
 
-                        {/* Answer Input or Result */}
+                        {/* Answer Input */}
                         <div className="p-4 sm:p-6">
-                            {!result ? (
-                                <div>
-                                    <label className="block text-sm font-medium text-[#172B4D] mb-2">
-                                        Your Answer
-                                    </label>
-                                    <textarea
-                                        value={answer}
-                                        onChange={(e) => setAnswer(e.target.value)}
-                                        placeholder="Type your answer here..."
-                                        className="w-full h-28 sm:h-32 px-3 sm:px-4 py-3 rounded border border-[#DFE1E6] focus:ring-2 focus:ring-[#4C9AFF] focus:border-transparent resize-none text-[#172B4D] placeholder-[#6B778C] text-sm"
-                                    />
-                                    <button
-                                        onClick={submitAnswer}
-                                        disabled={submitting || !answer.trim()}
-                                        className="mt-4 w-full px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        {submitting && (
-                                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                                        )}
-                                        {submitting ? "Checking..." : "Submit Answer"}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div>
-                                    {/* Result Banner */}
-                                    <div className={`rounded-lg p-4 mb-4 ${result.correct ? "bg-[#E3FCEF]" : "bg-[#FFEBE6]"}`}>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            {result.correct ? (
-                                                <svg className="w-5 h-5 text-[#36B37E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                </svg>
-                                            ) : (
-                                                <svg className="w-5 h-5 text-[#DE350B]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            )}
-                                            <span className={`font-semibold ${result.correct ? "text-[#006644]" : "text-[#DE350B]"}`}>
-                                                {result.correct ? "Correct!" : "Incorrect"}
-                                            </span>
-                                            <span className="text-xs sm:text-sm text-[#6B778C]">→ Box {result.correct ? Math.min(currentQuestion.leitner_box + 1, 5) : 1}</span>
-                                        </div>
-                                        {!result.correct && (
-                                            <p className="text-[#172B4D] text-sm">
-                                                <strong>Correct answer:</strong> {result.correct_answer}
-                                            </p>
-                                        )}
-                                    </div>
-
-                                    {/* Explanation */}
-                                    {result.explanation && (
-                                        <div className="bg-[#F4F5F7] rounded-lg p-4 mb-4">
-                                            <p className="text-[#42526E] text-sm">{result.explanation}</p>
-                                        </div>
-                                    )}
-
-                                    {/* Feedback for wrong answers */}
-                                    {result.feedback && (
-                                        <div className="bg-[#FFFAE6] border border-[#FFE380] rounded-lg p-4 mb-4">
-                                            <div className="flex items-start gap-2">
-                                                <svg className="w-4 h-4 text-[#FFAB00] flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                                </svg>
-                                                <p className="text-[#172B4D] text-sm">{result.feedback}</p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <button
-                                        onClick={nextQuestion}
-                                        className="w-full px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors"
-                                    >
-                                        {currentIndex < questions.length - 1 ? "Next Question" : "Finish Quiz"}
-                                    </button>
-                                </div>
-                            )}
+                            <label className="block text-sm font-medium text-[#172B4D] mb-2">
+                                Your Answer
+                            </label>
+                            <textarea
+                                value={answer}
+                                onChange={(e) => setAnswer(e.target.value)}
+                                placeholder="Type your answer here..."
+                                className="w-full h-28 sm:h-32 px-3 sm:px-4 py-3 rounded border border-[#DFE1E6] focus:ring-2 focus:ring-[#4C9AFF] focus:border-transparent resize-none text-[#172B4D] placeholder-[#6B778C] text-sm"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && e.metaKey && answer.trim()) {
+                                        submitAnswer();
+                                    }
+                                }}
+                            />
+                            <button
+                                onClick={submitAnswer}
+                                disabled={submitting || !answer.trim()}
+                                className="mt-4 w-full px-6 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                            >
+                                {submitting && (
+                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                                )}
+                                {submitting ? "Submitting..." : currentIndex < questions.length - 1 ? "Submit & Next" : "Submit & Finish"}
+                            </button>
+                            <p className="text-center text-xs text-[#6B778C] mt-2">
+                                Press ⌘+Enter to submit
+                            </p>
                         </div>
                     </div>
                 ) : (
