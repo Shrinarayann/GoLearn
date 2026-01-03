@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import Link from "next/link";
+import Image from "next/image";
 
 interface Session {
     session_id: string;
@@ -175,9 +176,13 @@ export default function DashboardPage() {
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 sm:gap-3">
-                            <div className="w-8 h-8 bg-[#0052CC] rounded flex items-center justify-center">
-                                <span className="text-white font-bold text-sm">GL</span>
-                            </div>
+                            <Image
+                                src="/logo.png"
+                                alt="GoLearn Logo"
+                                width={32}
+                                height={32}
+                                className="rounded"
+                            />
                             <h1 className="text-lg font-semibold text-[#172B4D]">GoLearn</h1>
                         </div>
                         <div className="flex items-center gap-2 sm:gap-4">
