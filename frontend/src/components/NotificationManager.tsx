@@ -13,6 +13,7 @@ export default function NotificationManager() {
     const [status, setStatus] = useState<string | null>(null);
     const [isDismissed, setIsDismissed] = useState(false);
     const lastRegisteredToken = useRef<string | null>(null);
+    const setupAttempted = useRef(false);
 
     useEffect(() => {
         const dismissed = localStorage.getItem("notification_reminder_dismissed");
@@ -41,7 +42,9 @@ export default function NotificationManager() {
     const setupNotifications = useCallback(async () => {
         if (!user || !idToken || !messaging) return;
         if (Notification.permission !== "granted") return;
+        if (setupAttempted.current) return; // Prevent repeated attempts
 
+        setupAttempted.current = true;
         setIsRegistering(true);
         setStatus("Starting registration...");
 
@@ -67,9 +70,17 @@ export default function NotificationManager() {
                 // Only register if token has changed
                 if (fcmToken !== lastRegisteredToken.current) {
                     setStatus("Token received! Syncing with backend...");
-                    await api.registerFcmToken(idToken, fcmToken);
-                    lastRegisteredToken.current = fcmToken;
-                    console.log("Token synced successfully.");
+                    try {
+                        await api.registerFcmToken(idToken, fcmToken);
+                        lastRegisteredToken.current = fcmToken;
+                        console.log("Token synced successfully.");
+                    } catch (apiError: any) {
+                        console.error("Failed to register token with backend:", apiError);
+                        setStatus(`Error: ${apiError.message || "Failed to sync with backend"}`);
+                        setupAttempted.current = false; // Allow retry on API error
+                        setIsRegistering(false);
+                        return;
+                    }
                 } else {
                     console.log("Token unchanged, skipping registration.");
                 }
@@ -77,9 +88,11 @@ export default function NotificationManager() {
                 setStatus(null);
             } else {
                 setStatus("Error: Firebase returned an empty token.");
+                setupAttempted.current = false; // Allow retry
             }
         } catch (err: any) {
             console.error("FCM Error:", err);
+            setupAttempted.current = false; // Allow retry on error
             if (err.name === "NotAllowedError" || err.code === "messaging/permission-blocked" || err.message?.includes("permission")) {
                 setStatus("CRITICAL ERROR: Browser/Firebase permission mismatch. Please use the 'NUCLEAR RESET' below.");
             } else {
@@ -91,10 +104,10 @@ export default function NotificationManager() {
     }, [user, idToken]);
 
     useEffect(() => {
-        if (permission === "granted" && !isRegistering) {
+        if (permission === "granted" && !isRegistering && !setupAttempted.current) {
             setupNotifications();
         }
-    }, [permission, setupNotifications, isRegistering]);
+    }, [permission, isRegistering]);
 
     const handleRequest = async () => {
         setStatus(null);
