@@ -7,6 +7,9 @@ from typing import Optional, List
 from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
+import os
+import json
+import base64
 
 from ..config import settings
 
@@ -15,12 +18,35 @@ _app = None
 _db = None
 
 
+def get_firebase_credentials():
+    """
+    Get Firebase credentials from either:
+    1. FIREBASE_CREDENTIALS_BASE64 env var (base64 encoded JSON) - for App Platform
+    2. FIREBASE_CREDENTIALS_PATH file path - for Droplet/local
+    """
+    # First try base64 encoded credentials (for Digital Ocean App Platform)
+    base64_creds = os.getenv("FIREBASE_CREDENTIALS_BASE64")
+    if base64_creds:
+        try:
+            decoded = base64.b64decode(base64_creds).decode('utf-8')
+            cred_dict = json.loads(decoded)
+            return credentials.Certificate(cred_dict)
+        except Exception as e:
+            print(f"Failed to decode FIREBASE_CREDENTIALS_BASE64: {e}")
+    
+    # Fall back to file path
+    if settings.FIREBASE_CREDENTIALS_PATH and os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
+        return credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+    
+    raise ValueError("No valid Firebase credentials found. Set FIREBASE_CREDENTIALS_BASE64 or FIREBASE_CREDENTIALS_PATH")
+
+
 def get_firebase_app():
     """Get or initialize Firebase app."""
     global _app
     if _app is None:
         try:
-            cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+            cred = get_firebase_credentials()
             _app = firebase_admin.initialize_app(cred, {
                 'storageBucket': settings.FIREBASE_STORAGE_BUCKET
             })
