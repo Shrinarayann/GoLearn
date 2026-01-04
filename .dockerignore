@@ -26,31 +26,40 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+test_*.py
 
-# Logs
+# Logs (will be mounted as volume)
 logs/
 *.log
 
-# Environment
+# Environment (secrets should not be in image)
 .env
 .env.local
 .env.*.local
 
-# Frontend
+# Frontend (deployed separately on Vercel)
 frontend/
 node_modules/
 
-# Documentation
+# Documentation (not needed in container)
 *.md
 !readme.md
 
-# Images and test files
+# Images (will be mounted as volume)
 images/
-test_*.py
 
-# Scripts
+# Scripts (not needed in container)
 scripts/
+
+# ADK cache directories
+.adk/
+study_agent/.adk/
+study_agent/**/.adk/
+study_agent/prompts/.adk/
 
 # Misc
 .DS_Store
 *.bak
+
+# Firebase credentials (will be mounted as volume)
+firebase-credentials.json

@@ -6,30 +6,41 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
-      - DEBUG=false
+      - DEBUG=${DEBUG:-false}
+      - PORT=8000
+      - WORKERS=${WORKERS:-2}
+      # Google/Gemini API
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Firebase configuration
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
       - FIREBASE_CREDENTIALS_PATH=/app/firebase-credentials.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+      # CORS - comma separated list of allowed origins
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     volumes:
+      # Mount Firebase credentials
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
       # Mount logs directory for persistence
-      - ./logs:/app/logs
+      - golearn_logs:/app/logs
+      # Mount images directory for persistence
+      - golearn_images:/app/images
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
-  # Optional: Nginx reverse proxy (uncomment if needed)
-  # nginx:
-  #   image: nginx:alpine
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #   depends_on:
-  #     - backend
-  #   restart: unless-stopped
+volumes:
+  golearn_logs:
+  golearn_images:
