@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import styles from './ChatPanel.module.css';
 
 interface ChatMessage {
@@ -18,6 +19,7 @@ interface ChatPanelProps {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function ChatPanel({ sessionId, isOpen, onClose }: ChatPanelProps) {
+    const { token } = useAuth();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -39,14 +41,22 @@ export default function ChatPanel({ sessionId, isOpen, onClose }: ChatPanelProps
     }, [isOpen, sessionId]);
 
     const loadHistory = async () => {
+        if (!token) {
+            console.error('ChatPanel - No authentication token available');
+            return;
+        }
+        
         try {
-            const token = localStorage.getItem('token');
+            console.log('ChatPanel - Loading history with token from AuthContext');
+            
             const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}/history`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (res.ok) {
                 const data = await res.json();
                 setMessages(data.messages || []);
+            } else {
+                console.error('ChatPanel - History load failed:', res.status, res.statusText);
             }
         } catch (error) {
             console.error('Failed to load chat history:', error);
@@ -55,6 +65,12 @@ export default function ChatPanel({ sessionId, isOpen, onClose }: ChatPanelProps
 
     const sendMessage = async () => {
         if (!input.trim() || isLoading) return;
+        
+        if (!token) {
+            console.error('ChatPanel - No authentication token available');
+            alert('Please sign in to use chat');
+            return;
+        }
 
         const userMessage = input.trim();
         setInput('');
@@ -65,7 +81,8 @@ export default function ChatPanel({ sessionId, isOpen, onClose }: ChatPanelProps
         setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
         try {
-            const token = localStorage.getItem('token');
+            console.log('ChatPanel - Sending message with token from AuthContext');
+            
             const response = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
                 method: 'POST',
                 headers: {
@@ -75,7 +92,11 @@ export default function ChatPanel({ sessionId, isOpen, onClose }: ChatPanelProps
                 body: JSON.stringify({ message: userMessage })
             });
 
-            if (!response.ok) throw new Error('Failed to send message');
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('ChatPanel - Send failed:', response.status, errorText);
+                throw new Error(`Failed to send message: ${response.status}`);
+            }
 
             // Handle SSE streaming
             const reader = response.body?.getReader();
