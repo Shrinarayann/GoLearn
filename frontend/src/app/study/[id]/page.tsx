@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import Link from "next/link";
 import PomodoroTimer from "@/components/PomodoroTimer";
 import ExamUploadModal from "@/components/ExamUploadModal";
+import ChatBot from "@/components/ChatBot";
 
 interface SessionData {
     session_id: string;
@@ -581,8 +582,72 @@ export default function StudySessionPage() {
                 onClose={() => setShowExamModal(false)}
                 sessionId={sessionId}
             />
+
+            {/* AI Chat Bot - only show when results exist */}
+            {hasResults && token && (
+                <ChatBot
+                    token={token}
+                    context={buildChatContext(session)}
+                />
+            )}
         </div>
     );
+}
+
+// Helper function to build context for chatbot
+function buildChatContext(session: SessionData | null): string {
+    if (!session) return "";
+
+    const contextParts: string[] = [];
+
+    // Add exploration context
+    if (session.exploration_result) {
+        const exp = session.exploration_result;
+        contextParts.push("=== EXPLORATION (Overview) ===");
+        if (exp.summary) contextParts.push(`Summary: ${exp.summary}`);
+        if (exp.structural_overview) contextParts.push(`Structure: ${exp.structural_overview}`);
+        if (exp.key_topics?.length) contextParts.push(`Key Topics: ${exp.key_topics.join(", ")}`);
+    }
+
+    // Add engagement context
+    if (session.engagement_result) {
+        const eng = session.engagement_result;
+        contextParts.push("\n=== ENGAGEMENT (Deep Analysis) ===");
+        if (eng.summary) contextParts.push(`Summary: ${eng.summary}`);
+        if (eng.detailed_analysis) contextParts.push(`Detailed Analysis: ${eng.detailed_analysis}`);
+        if (eng.concept_explanations) {
+            contextParts.push("Concepts:");
+            Object.entries(eng.concept_explanations).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.definitions) {
+            contextParts.push("Definitions:");
+            Object.entries(eng.definitions).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.formulas) {
+            contextParts.push("Formulas:");
+            Object.entries(eng.formulas).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.key_insights?.length) contextParts.push(`Key Insights: ${eng.key_insights.join("; ")}`);
+    }
+
+    // Add application context
+    if (session.application_result) {
+        const app = session.application_result;
+        contextParts.push("\n=== APPLICATION (Practical Use) ===");
+        if (app.practical_applications?.length) contextParts.push(`Applications: ${app.practical_applications.join("; ")}`);
+        if (app.connections?.length) contextParts.push(`Connections: ${app.connections.join("; ")}`);
+        if (app.critical_analysis) contextParts.push(`Critical Analysis: ${app.critical_analysis}`);
+        if (app.study_focus?.length) contextParts.push(`Study Focus: ${app.study_focus.join("; ")}`);
+        if (app.mental_models?.length) contextParts.push(`Mental Models: ${app.mental_models.join("; ")}`);
+    }
+
+    return contextParts.join("\n");
 }
 
 // === Tab Components ===
