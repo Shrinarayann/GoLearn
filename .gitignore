@@ -35,3 +35,6 @@ htmlcov/
 
 #Mac thing
 .DS_Store
+
+#rules
+*.rules
