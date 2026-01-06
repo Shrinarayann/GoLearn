@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import Link from "next/link";
 import PomodoroTimer from "@/components/PomodoroTimer";
 import ExamUploadModal from "@/components/ExamUploadModal";
+import ChatBot from "@/components/ChatBot";
 
 interface SessionData {
     session_id: string;
@@ -80,6 +81,7 @@ export default function StudySessionPage() {
     const [activeTab, setActiveTab] = useState<TabType>("exploration");
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [showExamModal, setShowExamModal] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // Per-phase loading states for streaming
     const [explorationLoading, setExplorationLoading] = useState(false);
@@ -234,7 +236,7 @@ export default function StudySessionPage() {
             {/* Header */}
             <header className="bg-white border-b border-[#DFE1E6] sticky top-0 z-10">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex flex-row items-center justify-between gap-3">
                         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
                             <Link
                                 href="/dashboard"
@@ -248,9 +250,9 @@ export default function StudySessionPage() {
                                 {session?.title || "Loading..."}
                             </h1>
                         </div>
-                        {/* Timer and Quiz/Exam buttons - visible on all tabs when results exist */}
+                        {/* Timer and Quiz/Exam buttons - Desktop view */}
                         {hasResults && (
-                            <div className="flex items-center gap-3">
+                            <div className="hidden sm:flex items-center gap-3">
                                 <PomodoroTimer autoStart={true} />
                                 <Link
                                     href={`/quiz/${sessionId}`}
@@ -301,8 +303,90 @@ export default function StudySessionPage() {
                                 </Link>
                             </div>
                         )}
+                        {/* Mobile menu button and timer */}
+                        {hasResults && (
+                            <div className="flex sm:hidden items-center gap-2">
+                                <PomodoroTimer autoStart={true} />
+                                <button
+                                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                                    className="p-2 text-[#6B778C] hover:text-[#172B4D] hover:bg-[#F4F5F7] rounded transition-colors"
+                                    aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+                                >
+                                    {mobileMenuOpen ? (
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    ) : (
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                        </svg>
+                                    )}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
+                {/* Mobile dropdown menu */}
+                {hasResults && mobileMenuOpen && (
+                    <div className="sm:hidden bg-white border-t border-[#DFE1E6] px-4 py-3 space-y-2">
+                        <Link
+                            href={`/quiz/${sessionId}`}
+                            className="block w-full px-4 py-3 bg-[#0052CC] text-white rounded font-medium hover:bg-[#0747A6] transition-colors text-sm text-center"
+                            onClick={() => setMobileMenuOpen(false)}
+                        >
+                            Start Quiz
+                        </Link>
+
+                        {/* Exam button with dynamic states - Mobile */}
+                        {examStatus.status === "generating" ? (
+                            <button
+                                disabled
+                                className="w-full px-4 py-3 bg-[#F4F5F7] text-[#6B778C] border border-[#DFE1E6] rounded font-medium text-sm text-center flex items-center justify-center gap-2 cursor-not-allowed"
+                            >
+                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#0052CC] border-t-transparent" />
+                                Generating...
+                            </button>
+                        ) : examStatus.status === "ready" && examStatus.pdfUrl ? (
+                            <a
+                                href={examStatus.pdfUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block w-full px-4 py-3 bg-[#36B37E] text-white rounded font-medium hover:bg-[#2E9E6E] transition-colors text-sm text-center"
+                                onClick={() => setMobileMenuOpen(false)}
+                            >
+                                Download Paper
+                            </a>
+                        ) : examStatus.status === "error" ? (
+                            <button
+                                onClick={() => {
+                                    setShowExamModal(true);
+                                    setMobileMenuOpen(false);
+                                }}
+                                className="w-full px-4 py-3 bg-[#FFEBE6] text-[#DE350B] border border-[#FF8F73] rounded font-medium hover:bg-[#FFD5CC] transition-colors text-sm text-center"
+                            >
+                                Retry Exam
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => {
+                                    setShowExamModal(true);
+                                    setMobileMenuOpen(false);
+                                }}
+                                className="w-full px-4 py-3 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center"
+                            >
+                                Create Exam
+                            </button>
+                        )}
+
+                        <Link
+                            href={`/study/${sessionId}/feynman`}
+                            className="block w-full px-4 py-3 bg-white text-[#0052CC] border border-[#0052CC] rounded font-medium hover:bg-[#DEEBFF] transition-colors text-sm text-center"
+                            onClick={() => setMobileMenuOpen(false)}
+                        >
+                            Learn with Feynman
+                        </Link>
+                    </div>
+                )}
             </header>
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -498,8 +582,72 @@ export default function StudySessionPage() {
                 onClose={() => setShowExamModal(false)}
                 sessionId={sessionId}
             />
+
+            {/* AI Chat Bot - only show when results exist */}
+            {hasResults && token && (
+                <ChatBot
+                    token={token}
+                    context={buildChatContext(session)}
+                />
+            )}
         </div>
     );
+}
+
+// Helper function to build context for chatbot
+function buildChatContext(session: SessionData | null): string {
+    if (!session) return "";
+
+    const contextParts: string[] = [];
+
+    // Add exploration context
+    if (session.exploration_result) {
+        const exp = session.exploration_result;
+        contextParts.push("=== EXPLORATION (Overview) ===");
+        if (exp.summary) contextParts.push(`Summary: ${exp.summary}`);
+        if (exp.structural_overview) contextParts.push(`Structure: ${exp.structural_overview}`);
+        if (exp.key_topics?.length) contextParts.push(`Key Topics: ${exp.key_topics.join(", ")}`);
+    }
+
+    // Add engagement context
+    if (session.engagement_result) {
+        const eng = session.engagement_result;
+        contextParts.push("\n=== ENGAGEMENT (Deep Analysis) ===");
+        if (eng.summary) contextParts.push(`Summary: ${eng.summary}`);
+        if (eng.detailed_analysis) contextParts.push(`Detailed Analysis: ${eng.detailed_analysis}`);
+        if (eng.concept_explanations) {
+            contextParts.push("Concepts:");
+            Object.entries(eng.concept_explanations).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.definitions) {
+            contextParts.push("Definitions:");
+            Object.entries(eng.definitions).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.formulas) {
+            contextParts.push("Formulas:");
+            Object.entries(eng.formulas).forEach(([key, val]) => {
+                contextParts.push(`- ${key}: ${val}`);
+            });
+        }
+        if (eng.key_insights?.length) contextParts.push(`Key Insights: ${eng.key_insights.join("; ")}`);
+    }
+
+    // Add application context
+    if (session.application_result) {
+        const app = session.application_result;
+        contextParts.push("\n=== APPLICATION (Practical Use) ===");
+        if (app.practical_applications?.length) contextParts.push(`Applications: ${app.practical_applications.join("; ")}`);
+        if (app.connections?.length) contextParts.push(`Connections: ${app.connections.join("; ")}`);
+        if (app.critical_analysis) contextParts.push(`Critical Analysis: ${app.critical_analysis}`);
+        if (app.study_focus?.length) contextParts.push(`Study Focus: ${app.study_focus.join("; ")}`);
+        if (app.mental_models?.length) contextParts.push(`Mental Models: ${app.mental_models.join("; ")}`);
+    }
+
+    return contextParts.join("\n");
 }
 
 // === Tab Components ===

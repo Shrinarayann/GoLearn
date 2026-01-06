@@ -547,6 +547,26 @@ class ApiClient {
             token,
         });
     }
+
+    // AI Chat
+    async sendChatMessage(
+        token: string,
+        message: string,
+        history: Array<{ role: string; content: string }>,
+        context?: string
+    ) {
+        return this.request<{
+            response: string;
+        }>("/chat/chat", {
+            method: "POST",
+            token,
+            body: {
+                message,
+                history,
+                context,
+            },
+        });
+    }
 }
 
 export const api = new ApiClient(API_BASE_URL);
