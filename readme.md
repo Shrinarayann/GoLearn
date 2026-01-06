@@ -14,7 +14,7 @@ An AI-powered educational platform using Google's Agent Development Kit (ADK) th
   - Smart box promotion/demotion based on answers
   - Feedback loop for re-explaining missed concepts
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.10+
